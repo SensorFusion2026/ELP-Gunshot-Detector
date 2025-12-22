@@ -38,7 +38,7 @@ if remote.
 # Data creation
 
 ⚠️ **IMPORTANT:** Steps **1** and **3** create shared, version-controlled artifacts.  
-⚠️ **Do NOT run them unless the team agrees to change the dataset.**
+⚠️ **Do NOT run them unless the team agrees to change the dataset.**  
 ⚠️ **In normal use, you should ONLY run steps 2 and 4.**
 
 1) **Clip plan (source of truth; committed — ⚠️ DO NOT rerun casually)**
