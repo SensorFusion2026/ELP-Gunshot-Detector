@@ -16,7 +16,7 @@ if ENVIRONMENT == "local" and not CORNELL_DATA_ROOT:
     exit() # Stop the script if the path isn't configured
 
 # ---------- Project root -----------
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 # ---------- Raw data roots ----------
 RAW_ROOT = Path(CORNELL_DATA_ROOT)
