@@ -34,3 +34,25 @@ or
 if local, or 
 `CORNELL_DATA_ROOT="None"`
 if remote.
+
+# Data creation
+
+⚠️ **IMPORTANT:** Steps **1** and **3** create shared, version-controlled artifacts.  
+⚠️ **Do NOT run them unless the team agrees to change the dataset.**
+⚠️ **In normal use, you should ONLY run steps 2 and 4.**
+
+1) **Clip plan (source of truth; committed — ⚠️ DO NOT rerun casually)**
+- Run: `python -m elp_gunshot.data_creation.create_clips_plan`
+- Output: `src/elp_gunshot/data_creation/clip_plan.csv`
+
+2) **Cut clips (derived; safe to run)**
+- Run: `python -m elp_gunshot.data_creation.cut_wav_clips`
+- Output: `data/wav_clips/{pos,neg}/...`
+
+3) **Splits (committed — ⚠️ DO NOT rerun casually)**
+- Run: `python -m elp_gunshot.data_creation.create_splits`
+- Output: `src/elp_gunshot/data_creation/splits/{model1,model2,model3}.csv`
+
+4) **TFRecords (derived; safe to run)**
+- Run: `MODEL=model1 python -m elp_gunshot.data_creation.make_tfrecords` (or model2/model3)
+- Output: `data/tfrecords/<MODEL>_<tag>/{train,val,test}.tfrecord`
