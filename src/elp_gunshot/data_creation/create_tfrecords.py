@@ -25,8 +25,8 @@ FFT_LENGTH = FRAME_LENGTH  # keep same as frame length for simplicity
 # (tune low_hz and high_hz later)
 SPEC_CFG = {
     "model1": {"mask": False},
-    "model2": {"mask": True, "low_hz": 100.0, "high_hz": 1800.0},
-    "model3": {"mask": True, "low_hz": 100.0, "high_hz": 1800.0},
+    "model2": {"mask": True, "low_hz": 100.0, "high_hz": 5000.0},
+    "model3": {"mask": True, "low_hz": 100.0, "high_hz": 5000.0},
 }
 cfg = SPEC_CFG[MODEL]
 
