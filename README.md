@@ -54,5 +54,19 @@ if remote.
 - Output: `src/elp_gunshot/data_creation/splits/{model1,model2,model3}.csv`
 
 4) **TFRecords (derived; safe to run)**
-- Run: `MODEL=model1 python -m elp_gunshot.data_creation.make_tfrecords` (or model2/model3)
-- Output: `data/tfrecords/<MODEL>_<tag>/{train,val,test}.tfrecord`
+
+- Run (defaults: MODEL=model1, MASK=nomask):  
+  `python -m elp_gunshot.data_creation.create_tfrecords`
+
+- Optional environment variables:  
+  - MODEL: `model1`|`model2`|`model3` (default: model1)
+  - MASK: `nomask` | `bp<low>_<high>` (default: nomask)  
+    Bandpass frequency mask in Hz; 0 <= low <= high <= 2000
+
+- Examples:  
+  `MODEL=model2 python -m elp_gunshot.data_creation.create_tfrecords`  
+  `MODEL=model3 MASK=bp100_1800 python -m elp_gunshot.data_creation.create_tfrecords`  
+  `MASK=bp150_1600 python -m elp_gunshot.data_creation.create_tfrecords`
+
+- Output:  
+  `data/tfrecords/<MODEL>_<MASK>/{train,val,test}.tfrecord`

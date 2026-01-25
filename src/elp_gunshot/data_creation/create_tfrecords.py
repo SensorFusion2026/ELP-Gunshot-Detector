@@ -1,34 +1,81 @@
 # src/elp_gunshot/data_creation/create_tfrecords.py
-# Usage: python -m elp_gunshot.data_creation.create_tfrecords
+# Usage:
+#   python -m elp_gunshot.data_creation.create_tfrecords
+#
+# Optional environment variables:
+#   MODEL=model1|model2|model3      (default: model1)
+#   MASK=nomask | bp<low>_<high>    (default: nomask)
+#       optional frequency mask (bandpass filter); 0 <= low <= high <= 2000 Hz
+#
+# Examples:
+#   MODEL=model2 python -m elp_gunshot.data_creation.create_tfrecords
+#   MODEL=model3 MASK=bp100_1800 python -m elp_gunshot.data_creation.create_tfrecords
+#   MASK=bp150_1600 python -m elp_gunshot.data_creation.create_tfrecords
 
 from pathlib import Path
 import pandas as pd
 import tensorflow as tf
+import os
+import re
 
 from elp_gunshot.config.paths import *
 
 # -----------------------
-# Settings
+# CONFIG
 # -----------------------
-MODEL = "model1"  # change to "model2" / "model3"
+MODEL = os.getenv("MODEL", "model1").strip()
+if MODEL not in ("model1", "model2", "model3"):
+    raise ValueError('Invalid MODEL. Use MODEL=model1|model2|model3.')
+
+MASK = os.getenv("MASK", "nomask").strip()
 
 CLIP_LEN_S = 4.0
 TARGET_SR = 4000  # standardize to 4kHz
 EXPECTED_SAMPLES = int(TARGET_SR * CLIP_LEN_S)
+NYQUIST_HZ = TARGET_SR // 2  # 2000 for 4kHz
 
 # STFT params (tune later)
 FRAME_LENGTH = 256
 FRAME_STEP = 128
 FFT_LENGTH = FRAME_LENGTH  # keep same as frame length for simplicity
 
-# Optional frequency mask by model (OFF for model1 baseline)
-# (tune low_hz and high_hz later)
-SPEC_CFG = {
-    "model1": {"mask": False},
-    "model2": {"mask": True, "low_hz": 100.0, "high_hz": 1800.0},
-    "model3": {"mask": True, "low_hz": 100.0, "high_hz": 1800.0},
-}
-cfg = SPEC_CFG[MODEL]
+# Parse MASK (frequency filter) env variable
+# Helper function
+def parse_mask(mask: str) -> dict:
+    """
+    Parse the MASK environment variable into a frequency mask config.
+
+    Args:
+        mask: Value of the MASK env variable.
+            Supported formats:
+                - nomask
+                - bp<low>_<high>    (integer Hz)
+
+            Constraints:
+                - 0 <= low <= high <= NYQUIST_HZ
+
+    Returns:
+        Dict with mask configuration parameters.
+
+    Raises:
+        ValueError: If MASK format or frequency range is invalid.
+    """
+    if mask == "nomask":
+        return {"mask": False}
+
+    m = re.fullmatch(r"bp(\d+)_(\d+)", mask)
+    if not m:
+        raise ValueError(f'Invalid MASK="{mask}". Use MASK=nomask or MASK=bp<low>_<high> (0<=low<=high<={NYQUIST_HZ}).')
+
+    low = int(m.group(1))
+    high = int(m.group(2))
+
+    if not (0 <= low <= high <= NYQUIST_HZ):
+        raise ValueError(f'Invalid MASK="{mask}". Range must satisfy 0<=low<=high<={NYQUIST_HZ}.')
+
+    return {"mask": True, "low_hz": float(low), "high_hz": float(high)}
+
+cfg = parse_mask(MASK)
 
 tag = "nomask" if not cfg.get("mask", False) else f"bp{int(cfg['low_hz'])}_{int(cfg['high_hz'])}"
 OUT_DIR = TFRECORDS_ROOT / f"{MODEL}_{tag}"
