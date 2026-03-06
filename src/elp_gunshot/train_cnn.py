@@ -55,8 +55,12 @@ RUNS_DIR = Path(os.getenv("RUNS_DIR", "runs"))       # local run outputs (not TF
 RUNS_DIR.mkdir(exist_ok=True)
 
 BATCH_SIZE = 32
+#BATCH_SIZE = 64 #for best model 3 training
 EPOCHS = 10
+#EPOCHS = 30 #for best model 2 training
+#EPOCHS = 40 #for best model 3 training 
 LEARNING_RATE = 1e-4
+#LEARNING_RATE = 3e-5 #for best model 3 training 
 AUTOTUNE = tf.data.AUTOTUNE
 
 SPEC_HEIGHT = 124
