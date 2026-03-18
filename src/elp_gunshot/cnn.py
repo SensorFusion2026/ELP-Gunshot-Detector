@@ -1,11 +1,10 @@
 # src/elp_gunshot/cnn.py
 """CNN architecture for ELP Gunshot Detector training."""
 
-import keras
 import tensorflow as tf
 
 
-@keras.saving.register_keras_serializable(package="elp_gunshot")
+@tf.keras.utils.register_keras_serializable(package="elp_gunshot")
 class CNN(tf.keras.Model):
     """Compact CNN for gunshot spectrogram classification."""
 

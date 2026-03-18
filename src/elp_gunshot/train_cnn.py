@@ -143,12 +143,10 @@ def _choose_threshold_from_validation(
     - tie-break by F1
     - if none satisfy precision floor, maximize F1
     """
-    precisions, recalls, thresholds = precision_recall_curve(y_true_arr, y_score_arr)
+    # precisions, recalls, thresholds = precision_recall_curve(y_true_arr, y_score_arr)
 
     candidate_rows = []
-    threshold_values = np.unique(
-        np.concatenate(([0.0], thresholds, [0.5], [1.0]))
-    )
+    threshold_values = np.linspace(0.0, 1.0, num=101)
 
     for threshold in threshold_values:
         metrics = _compute_metrics(y_true_arr, y_score_arr, float(threshold))
@@ -157,7 +155,7 @@ def _choose_threshold_from_validation(
     valid = [row for row in candidate_rows if row["precision"] >= min_precision]
 
     if valid:
-        best = max(valid, key=lambda row: (row["recall"], row["f1"], -abs(row["threshold"] - 0.5)))
+        best = max(valid, key=lambda row: (row["recall"], row["f1"], -abs(row["threshold"] - 0.5)),)
     else:
         best = max(candidate_rows, key=lambda row: (row["f1"], row["recall"]))
 

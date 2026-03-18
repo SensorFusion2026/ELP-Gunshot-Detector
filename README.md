@@ -269,9 +269,12 @@ Includes:
 | `params.json` | All hyperparameters, TFRecord paths, class weights |
 | `history.csv` | Per-epoch loss, accuracy, precision, recall, AUC (train + val) |
 | `best_model.keras` | Best checkpoint (monitored by val AUC) |
-| `final_model.keras` | Last-epoch model |
+| `final_model.keras` | Final in-memory model state after training (with `EarlyStopping(restore_best_weights=True)`, this is typically best validation weights when early stop triggers) |
+| `val_metrics.json` | Validation-set metrics at chosen operating threshold |
+| `val_predictions.csv` | Validation per-clip predictions with selected threshold |
+| `val_metrics_by_threshold.csv` | Validation precision/recall/F1 summary across candidate thresholds |
 | `test_metrics.json` | Test-set accuracy, precision, recall, AUC, and confusion matrix keys `tp/tn/fp/fn` |
-| `test_predictions.csv` | Per-clip: `clip_wav_relpath`, `y_true`, `y_pred`, `y_score` |
+| `test_predictions.csv` | Per-clip: `clip_wav_relpath`, `y_true`, `y_pred`, `y_score`, `threshold` |
 | `logs/` | TensorBoard event files |
 
 ---
