@@ -8,7 +8,9 @@ import pandas as pd
 
 from elp_gunshot.config.paths import CLIPS_PLAN_CSV, RAW_ROOT, WAV_CLIPS_ROOT
 
-# PLAN_CSV = CLIPS_PLAN_CSV
+if RAW_ROOT == "None":
+    raise ValueError("RAW_ROOT is not set. Please set RAW_ROOT in config/paths.py to the location of the raw wav files.")
+
 OUT_ROOT = WAV_CLIPS_ROOT  # data/wav_clips
 
 if not CLIPS_PLAN_CSV.exists():

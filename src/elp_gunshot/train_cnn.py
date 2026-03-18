@@ -52,7 +52,7 @@ VAL_TF = BASE_DIR / "val.tfrecord"
 TEST_TF  = BASE_DIR / "test.tfrecord"
 
 RUNS_DIR = Path(os.getenv("RUNS_DIR", str(DEFAULT_RUNS_DIR)))
-RUNS_DIR.mkdir(exist_ok=True)
+RUNS_DIR.mkdir(parents=True, exist_ok=True)
 
 BATCH_SIZE = 32
 #BATCH_SIZE = 64 #for best model 3 training

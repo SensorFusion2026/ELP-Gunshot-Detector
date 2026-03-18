@@ -28,6 +28,9 @@ BUFFER_S = 10.0         # negatives must be >=10s away from any positive window
 NEG_PER_POS = 3         # per saved positive, per WAV
 RNG = np.random.default_rng(0)
 
+if RAW_ROOT == "None":
+    raise ValueError("RAW_ROOT is not set. Please set RAW_ROOT in config/paths.py to the location of the raw wav files.")
+
 # -----------------------
 # Safety check: clip plan overwrite
 # -----------------------

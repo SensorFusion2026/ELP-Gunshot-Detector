@@ -23,21 +23,21 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 load_dotenv(dotenv_path=PROJECT_ROOT / ".env")
 
 ENVIRONMENT = os.getenv("ENVIRONMENT", "remote")
-CORNELL_DATA_ROOT = os.getenv("CORNELL_DATA_ROOT")
+CORNELL_DATA_ROOT = os.getenv("CORNELL_DATA_ROOT", "None")
 
 # ---------------------------------------------------------------------
 # Raw Cornell data roots (local only)
 # ---------------------------------------------------------------------
 
 if ENVIRONMENT == "local":
-    if not CORNELL_DATA_ROOT:
+    if not CORNELL_DATA_ROOT or CORNELL_DATA_ROOT.strip().lower() == "none":
         raise ValueError(
-            "CORNELL_DATA_ROOT not found. Create a .env in the project root and add:\n"
+            "CORNELL_DATA_ROOT not found. Ensure .env exists in the project root and add:\n"
             'CORNELL_DATA_ROOT="/path/to/your/data"\n'
             'ENVIRONMENT="local"'
         )
 
-    RAW_ROOT = Path(CORNELL_DATA_ROOT)
+    RAW_ROOT = Path(CORNELL_DATA_ROOT.strip()).expanduser()
 
     PNNN_ROOT = RAW_ROOT / "Gunshot" / "Training" / "pnnn_dep1-7"
     KORUP_ROOT = RAW_ROOT / "Gunshot" / "Testing" / "Korup"
