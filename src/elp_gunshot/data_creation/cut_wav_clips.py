@@ -2,25 +2,26 @@
 # Usage: python -m elp_gunshot.data_creation.cut_wav_clips
 
 import wave
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
-from elp_gunshot.config.paths import *
+from elp_gunshot.config.paths import CLIPS_PLAN_CSV, RAW_ROOT, WAV_CLIPS_ROOT
 
-PLAN_CSV = Path(__file__).resolve().parent / "clips_plan.csv"
+if RAW_ROOT == "None":
+    raise ValueError("RAW_ROOT is not set. Please set RAW_ROOT in config/paths.py to the location of the raw wav files.")
+
 OUT_ROOT = WAV_CLIPS_ROOT  # data/wav_clips
 
-if not PLAN_CSV.exists():
-    raise FileNotFoundError(f"Missing plan file: {PLAN_CSV}. Run create_clips_plan.py first.")
+if not CLIPS_PLAN_CSV.exists():
+    raise FileNotFoundError(f"Missing plan file: {CLIPS_PLAN_CSV}. Run create_clips_plan.py first.")
 
-plan = pd.read_csv(PLAN_CSV)
+plan = pd.read_csv(CLIPS_PLAN_CSV)
 
 required = {"label", "location", "source_wav_relpath", "start_s", "duration_s", "clip_wav_relpath"}
 missing = required - set(plan.columns)
 if missing:
-    raise ValueError(f"clip_plan.csv missing columns: {sorted(missing)}")
+    raise ValueError(f"clips_plan.csv missing columns: {sorted(missing)}")
 
 saved = 0
 skipped_exists = 0

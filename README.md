@@ -1,72 +1,263 @@
-# ELP-Gunshot-Detector
-ML Gunshot Detector for Elephant Listening Project. African forest elephant conservation research though CSU Chico in collaboration with Cornell University.
+# ELP Gunshot Detector
 
-# Environment setup (macOS / Linux)
+A CNN-based detector for gunshot audio, built for the Elephant Listening Project (Cornell / CSU Chico / CU Boulder).
+Training runs locally or on the SDSC Expanse ACCESS GPU supercomputer.
 
-## Create a virtual environment with a supported Python version (3.12 recommended)
-`python3.12 -m venv venv`
+> **Python baseline:** Python 3.10 recommended for compatibility with Expanse (TensorFlow 2.15 container).
+> Dependencies are managed via `pyproject.toml`.
 
-## Activate the virtual environment
-`source venv/bin/activate`
+---
 
-## Upgrade pip
-`python -m pip install --upgrade pip`
+## Local Setup
 
-## Install Python dependencies
-`pip install -r requirements.txt`
+### Create and activate environment
 
-## Install this repo in editable mode
-`pip install -e .`
+```bash
+python3.10 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+pip install -e .[full]
+```
 
-# Environment variables (.env setup)
+---
 
-## Copy the example environment file
-`cp .env.example .env`
+## Environment Variables (.env)
 
-## Then edit .env
-### Set environment type
-`ENVIRONMENT="local"`
-or 
-`ENVIRONMENT="remote"`
+```bash
+cp .env.example .env
+```
 
-### Path to the raw Cornell ELP data on your machine
-`CORNELL_DATA_ROOT="/path/to/your/local/raw/ELP_Cornell_Data"`
-if local, or 
-`CORNELL_DATA_ROOT="None"`
-if remote.
+Edit `.env`:
 
-# Data creation
+```bash
+ENVIRONMENT="local"
+CORNELL_DATA_ROOT="/path/to/ELP_Cornell_Data"
+```
 
-⚠️ **IMPORTANT:** Steps **1** and **3** create shared, version-controlled artifacts.  
-⚠️ **Do NOT run them unless the team agrees to change the dataset.**  
-⚠️ **In normal use, you should ONLY run steps 2 and 4.**
+For remote (Expanse):
 
-1) **Clip plan (source of truth; committed — ⚠️ DO NOT rerun casually)**
-- Run: `python -m elp_gunshot.data_creation.create_clips_plan`
-- Output: `src/elp_gunshot/data_creation/clip_plan.csv`
+```bash
+ENVIRONMENT="remote"
+CORNELL_DATA_ROOT="None"
+```
+Note: CORNELL_DATA_ROOT not required for remote training
 
-2) **Cut clips (derived; safe to run)**
-- Run: `python -m elp_gunshot.data_creation.cut_wav_clips`
-- Output: `data/wav_clips/{pos,neg}/...`
+---
 
-3) **Splits (committed — ⚠️ DO NOT rerun casually)**
-- Run: `python -m elp_gunshot.data_creation.create_splits`
-- Output: `src/elp_gunshot/data_creation/splits/{model1,model2,model3}.csv`
+## Data Creation
 
-4) **TFRecords (derived; safe to run)**
+**Steps 1 and 3 create shared, version-controlled artifacts.**
+Do **NOT** re-run them unless the team agrees to change the dataset.
 
-- Run (defaults: MODEL=model1, MASK=nomask):  
-  `python -m elp_gunshot.data_creation.create_tfrecords`
+### Pipeline
 
-- Optional environment variables:  
-  - MODEL: `model1`|`model2`|`model3` (default: model1)
-  - MASK: `nomask` | `bp<low>_<high>` (default: nomask)  
-    Bandpass frequency mask in Hz; 0 <= low <= high <= 2000
+```
+create_clips_plan → cut_wav_clips → create_splits → create_tfrecords
+```
 
-- Examples:  
-  `MODEL=model2 python -m elp_gunshot.data_creation.create_tfrecords`  
-  `MODEL=model3 MASK=bp100_1800 python -m elp_gunshot.data_creation.create_tfrecords`  
-  `MASK=bp150_1600 python -m elp_gunshot.data_creation.create_tfrecords`
+### Steps
 
-- Output:  
-  `data/tfrecords/<MODEL>_<MASK>/{train,val,test}.tfrecord`
+```bash
+# 1. Clip plan (committed, do not re-run casually)
+python -m elp_gunshot.data_creation.create_clips_plan
+
+# 2. Cut clips
+python -m elp_gunshot.data_creation.cut_wav_clips
+
+# 3. Splits (committed, do not re-run casually)
+python -m elp_gunshot.data_creation.create_splits
+
+# 4. TFRecords
+python -m elp_gunshot.data_creation.create_tfrecords
+```
+
+#### TFRecords options
+
+Optional environment variables:
+
+- `MODEL`: `model1` | `model2` | `model3` (default: `model1`)
+- `MASK`: `nomask` | `bp<low>_<high>` (default: `nomask`)  
+  Bandpass frequency mask in Hz; `0 <= low <= high <= 2000`
+
+Examples:
+
+```bash
+MODEL=model2 python -m elp_gunshot.data_creation.create_tfrecords
+MODEL=model3 MASK=bp100_1800 python -m elp_gunshot.data_creation.create_tfrecords
+MASK=bp150_1600 python -m elp_gunshot.data_creation.create_tfrecords
+```
+
+Output:
+```
+data/tfrecords/<MODEL>_<MASK>/{train,val,test}.tfrecord
+```
+
+---
+
+## Model Training via SDSC Expanse
+
+```bash
+ssh <your_username>@login.expanse.sdsc.edu
+```
+Refer to [SDSC Expanse User Guide](https://www.sdsc.edu/systems/expanse/user_guide.html) for first time setup and further documentation.
+
+### Project layout
+
+Clone the repo under the shared project root so it co-resides with other Elephant Listening Project material:
+
+```
+/expanse/lustre/projects/cso100/<your_username>/ElephantListeningProject/
+   ├── ELP-Gunshot-Detector/
+   ├── ELP-Rumble-Detector/
+   └── tensorflow-2.15.0-gpu.sif
+```
+
+---
+
+### Upload processed data tfrecords
+
+Use [Globus Connect Personal](https://docs.globus.org/globus-connect-personal/) with your SDSC Expanse credentials to transfer files between your local machine and the remote server. [Tutorial](https://docs.globus.org/guides/tutorials/manage-files/transfer-files/). Note: In the [Globus file manager tab](https://app.globus.org/file-manager), search for the collection `SDSC HPC - Expanse Lustre`, then either append path to direct it to your project storage or navigate to your project storage via the UI.
+
+To ensure consistency between local and remote environments, use the same relative data folder structure on both systems.
+```
+ELP-Gunshot-Detector/
+├── data/
+│   └── tfrecords/
+│       ├── model1_nomask/
+│       ├── model2_nomask/
+│       └── model3_nomask/
+├── slurm_scripts/
+├── src/
+└── ...
+```
+
+---
+
+## Build TensorFlow Container on Non-Expanse Linux/Linux VM
+**Note: This step can be skipped if container already exists. Container is shared with ELP-Rumble-Detector repo.**
+
+Training runs inside a Singularity container. Build it once on a non-Expanse Linux machine with [Apptainer](https://apptainer.org/) installed:
+
+```bash
+apptainer pull tensorflow-2.15.0-gpu.sif \
+  docker://tensorflow/tensorflow:2.15.0-gpu
+```
+
+Upload it to Expanse so the file exists at: `$PROJECT_ROOT/tensorflow-2.15.0-gpu.sif`, i.e. one level above `ELP-Gunshot-Detector/`.
+
+```bash
+rsync -avP tensorflow-2.15.0-gpu.sif \
+  <your_username>@login.expanse.sdsc.edu:/expanse/lustre/projects/cso100/<your_username>/ElephantListeningProject/
+```
+Alternatively, you may use Globus Connect for container upload.
+
+---
+
+## Remote Training Workflow
+
+```bash
+ssh <your_username>@login.expanse.sdsc.edu
+cd /expanse/lustre/projects/cso100/<your_username>/ElephantListeningProject/ELP-Gunshot-Detector
+```
+
+### Step 0 — create logs directory
+
+```bash
+mkdir -p slurm_logs
+```
+
+---
+
+### Step 1 — install the package into the container’s Python environment (run once, or after dependency changes):
+
+```bash
+bash slurm_scripts/setup-pythonuserbase.sh
+```
+
+This installs the repo as an editable package into `$PROJECT_ROOT/.pythonuserbase` in a shared user base (`$PROJECT_ROOT/.pythonuserbase`) used by the container. It records a hash of `pyproject.toml` so the training scripts can detect when a reinstall is needed. Re-run if pyproject.toml changes.
+
+---
+
+### Step 2 — submit job
+
+```bash
+sbatch slurm_scripts/run-train-gpu-debug.sh model1 2
+sbatch slurm_scripts/run-train-gpu-shared.sh model3
+```
+
+Arguments:
+- `MODEL`: model1 | model2 | model3
+- `EPOCHS` (optional)
+
+---
+
+### Monitor jobs
+
+```bash
+squeue -u $USER -l
+sacct -j <job_id> --format=JobID,State,Elapsed,MaxRSS
+cat slurm_logs/<job>.o<id>.<node>
+scancel <job_id>
+```
+
+---
+
+## Training (Local)
+
+```bash
+MODEL=model1 python -m elp_gunshot.train_cnn
+```
+
+Override epoch count (useful for quick smoke-tests):
+
+```bash
+MODEL=model1 EPOCHS=2 python -m elp_gunshot.train_cnn
+```
+
+---
+
+## Artifacts saved per run
+
+Each run creates:
+
+```
+runs/<model>_<tag>_.../
+```
+
+Includes:
+
+| File | Description |
+|------|-------------|
+| `params.json` | All hyperparameters, TFRecord paths, class weights |
+| `history.csv` | Per-epoch loss, accuracy, precision, recall, AUC (train + val) |
+| `best_model.keras` | Best checkpoint (monitored by val AUC) |
+| `final_model.keras` | Last-epoch model |
+| `test_metrics.json` | Test-set accuracy, precision, recall, AUC, confusion matrix |
+| `test_predictions.csv` | Per-clip: `clip_wav_relpath`, `y_true`, `y_pred`, `y_score` |
+| `logs/` | TensorBoard event files |
+
+---
+
+## Notes
+
+- TensorFlow comes from container (not pip)
+- NumPy must be `<2` for TF 2.15
+- Gunshot + Rumble share the same environment — keep dependencies aligned
+
+---
+
+## Tools and Resources
+
+- **[RavenPro / RavenLite](https://www.ravensoundsoftware.com/software/)** — view and annotate audio waveforms and spectrograms
+- **[SDSC Expanse User Guide](https://www.sdsc.edu/systems/expanse/user_guide.html)**
+- **[SDSC Basic Skills](https://github.com/sdsc-hpc-training-org/basic_skills)** — Linux, interactive computing, Jupyter on Expanse
+- **[SDSC On-Demand Learning](https://www.sdsc.edu/education/on-demand-learning/index.html)** — webinars and educational archive
+- **[Globus Connect Personal Docs](https://docs.globus.org/globus-connect-personal/)** - File Transfer to Expanse
+- **[Globus Connect Tutorial](https://docs.globus.org/guides/tutorials/manage-files/transfer-files/)**
+
+### Related research
+
+- [SensorFusion2026](https://github.com/SensorFusion2026)
+- [2024–2025 ELP CNN vs RNN (SSIF 2025)](https://www.ecst.csuchico.edu/~sbsiewert/extra/research/elephant/SSIF-2025-ELP-Presentation.pdf)
+- [Dr. Siewert's research group](https://sites.google.com/csuchico.edu/research/home)
+- [Elephant Listening Project](https://elephantlisteningproject.org/)
