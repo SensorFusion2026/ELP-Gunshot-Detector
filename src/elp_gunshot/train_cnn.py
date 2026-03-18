@@ -16,7 +16,13 @@ from pathlib import Path
 
 import numpy as np
 import tensorflow as tf
-from sklearn.metrics import accuracy_score, precision_score, recall_score, roc_auc_score
+from sklearn.metrics import (
+    accuracy_score,
+    precision_recall_curve,
+    precision_score,
+    recall_score,
+    roc_auc_score,
+)
 
 from elp_gunshot.cnn import CNN
 from elp_gunshot.config.paths import RUNS_DIR as DEFAULT_RUNS_DIR, TFRECORDS_ROOT
@@ -61,6 +67,148 @@ def _validate_artifacts(export_dir: Path, required_names: list[str]) -> None:
         )
 
 
+def _collect_predictions(model, dataset, has_clip_id: bool):
+    """
+    Collect labels, probabilities, predictions-ready metadata from a dataset.
+    Returns:
+      clip_ids: list[str] | None
+      y_true_arr: np.ndarray
+      y_score_arr: np.ndarray
+    """
+    clip_ids = [] if has_clip_id else None
+    y_true, y_score = [], []
+
+    for batch in dataset:
+        if has_clip_id:
+            x_batch, y_batch, id_batch = batch
+        else:
+            x_batch, y_batch = batch
+
+        probs = model(x_batch, training=False).numpy().flatten()
+        y_score.extend(probs.tolist())
+        y_true.extend(y_batch.numpy().flatten().astype(int).tolist())
+
+        if has_clip_id:
+            clip_ids.extend([cid.decode("utf-8") for cid in id_batch.numpy()])
+
+    return clip_ids, np.array(y_true), np.array(y_score)
+
+
+def _confusion_dict(y_true_arr: np.ndarray, y_pred_arr: np.ndarray) -> dict:
+    tp = int(np.sum((y_true_arr == 1) & (y_pred_arr == 1)))
+    tn = int(np.sum((y_true_arr == 0) & (y_pred_arr == 0)))
+    fp = int(np.sum((y_true_arr == 0) & (y_pred_arr == 1)))
+    fn = int(np.sum((y_true_arr == 1) & (y_pred_arr == 0)))
+    return {"tp": tp, "tn": tn, "fp": fp, "fn": fn}
+
+
+def _compute_metrics(y_true_arr: np.ndarray, y_score_arr: np.ndarray, threshold: float) -> dict:
+    y_pred_arr = (y_score_arr >= threshold).astype(int)
+
+    try:
+        auc = float(roc_auc_score(y_true_arr, y_score_arr))
+    except ValueError:
+        auc = float("nan")
+
+    bce = tf.keras.losses.BinaryCrossentropy()
+
+
+    metrics = {
+        "threshold": float(threshold),
+        "accuracy": float(accuracy_score(y_true_arr, y_pred_arr)),
+        "bce_loss": float(bce(y_true_arr, y_score_arr).numpy()),
+        "precision": float(precision_score(y_true_arr, y_pred_arr, zero_division=0)),
+        "recall": float(recall_score(y_true_arr, y_pred_arr, zero_division=0)),
+        "auc": auc,
+        "confusion_matrix": _confusion_dict(y_true_arr, y_pred_arr),
+        "n_examples": int(len(y_true_arr)),
+    }
+
+    p = metrics["precision"]
+    r = metrics["recall"]
+    metrics["f1"] = float(0.0 if (p + r) == 0 else (2 * p * r) / (p + r))
+    return metrics
+
+
+def _choose_threshold_from_validation(
+    y_true_arr: np.ndarray,
+    y_score_arr: np.ndarray,
+    min_precision: float,
+) -> tuple[float, list[dict]]:
+    """
+    Choose threshold on validation set.
+
+    Rule:
+    - among thresholds with precision >= min_precision, maximize recall
+    - tie-break by F1
+    - if none satisfy precision floor, maximize F1
+    """
+    precisions, recalls, thresholds = precision_recall_curve(y_true_arr, y_score_arr)
+
+    candidate_rows = []
+    threshold_values = np.unique(
+        np.concatenate(([0.0], thresholds, [0.5], [1.0]))
+    )
+
+    for threshold in threshold_values:
+        metrics = _compute_metrics(y_true_arr, y_score_arr, float(threshold))
+        candidate_rows.append(metrics)
+
+    valid = [row for row in candidate_rows if row["precision"] >= min_precision]
+
+    if valid:
+        best = max(valid, key=lambda row: (row["recall"], row["f1"], -abs(row["threshold"] - 0.5)))
+    else:
+        best = max(candidate_rows, key=lambda row: (row["f1"], row["recall"]))
+
+    return float(best["threshold"]), candidate_rows
+
+
+def _write_predictions_csv(
+    path: Path,
+    clip_ids,
+    y_true_arr: np.ndarray,
+    y_score_arr: np.ndarray,
+    threshold: float,
+) -> None:
+    y_pred_arr = (y_score_arr >= threshold).astype(int)
+
+    with open(path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["clip_wav_relpath", "y_true", "y_pred", "y_score", "threshold"])
+        if clip_ids is None:
+            for idx, (yt, yp, ys) in enumerate(zip(y_true_arr, y_pred_arr, y_score_arr)):
+                writer.writerow([f"example_{idx}", int(yt), int(yp), f"{float(ys):.6f}", f"{threshold:.6f}"])
+        else:
+            for cid, yt, yp, ys in zip(clip_ids, y_true_arr, y_pred_arr, y_score_arr):
+                writer.writerow([cid, int(yt), int(yp), f"{float(ys):.6f}", f"{threshold:.6f}"])
+
+
+def _write_threshold_table(path: Path, rows: list[dict]) -> None:
+    with open(path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(
+            ["threshold", "accuracy", "precision", "recall", "f1", "auc", "tp", "tn", "fp", "fn", "n_examples"]
+        )
+        for row in sorted(rows, key=lambda r: r["threshold"]):
+            cm = row["confusion_matrix"]
+            writer.writerow(
+                [
+                    f"{row['threshold']:.6f}",
+                    f"{row['accuracy']:.6f}",
+                    f"{row['precision']:.6f}",
+                    f"{row['recall']:.6f}",
+                    f"{row['f1']:.6f}",
+                    f"{row['auc']:.6f}" if not np.isnan(row["auc"]) else "nan",
+                    cm["tp"],
+                    cm["tn"],
+                    cm["fp"],
+                    cm["fn"],
+                    row["n_examples"],
+                ]
+            )
+
+
 def main():
     mixed_precision_enabled = _configure_gpu()
 
@@ -71,6 +219,11 @@ def main():
     epochs = int(os.getenv("EPOCHS", 40))
     learning_rate = float(os.getenv("LEARNING_RATE", "3e-5"))
     dropout_rate = float(os.getenv("DROPOUT_RATE", "0.5"))
+    early_stop_patience = int(os.getenv("EARLY_STOP_PATIENCE", 8))
+    min_precision = float(os.getenv("VAL_MIN_PRECISION", "0.75"))
+    seed = int(os.getenv("SEED", "42"))
+
+    tf.keras.utils.set_random_seed(seed)
 
     base_dir = TFRECORDS_ROOT / f"{model_name}_{tag}"
     train_tf = base_dir / "train.tfrecord"
@@ -101,6 +254,7 @@ def main():
 
     train_ds = make_ds(train_tf, parse_fn, batch_size, shuffle=True, drop_remainder=False)
     val_ds = make_ds(val_tf, parse_fn, batch_size, shuffle=False, drop_remainder=False)
+    val_ds_with_id = make_ds(val_tf, parse_with_id_fn, batch_size, shuffle=False, drop_remainder=False)
     test_ds = make_ds(test_tf, parse_with_id_fn, batch_size, shuffle=False, drop_remainder=False)
 
     n_train = count_examples(train_tf)
@@ -130,6 +284,9 @@ def main():
         "dropout_rate": dropout_rate,
         "class_weights": {str(k): v for k, v in class_weights.items()},
         "mixed_precision": mixed_precision_enabled,
+        "early_stop_patience": early_stop_patience,
+        "val_min_precision": min_precision,
+        "seed": seed,
     }
 
     if metadata_path.exists():
@@ -146,6 +303,7 @@ def main():
             tf.keras.metrics.Precision(name="precision"),
             tf.keras.metrics.Recall(name="recall"),
             tf.keras.metrics.AUC(name="auc"),
+            tf.keras.metrics.AUC(name="pr_auc", curve="PR"),
         ],
     )
     model.build((None, *SPEC_SHAPE))
@@ -160,11 +318,17 @@ def main():
             save_best_only=True,
             verbose=1,
         ),
+        tf.keras.callbacks.EarlyStopping(
+            monitor="val_auc",
+            mode="max",
+            patience=early_stop_patience,
+            restore_best_weights=True,
+            verbose=1,
+        ),
         tf.keras.callbacks.CSVLogger(str(export_dir / "history.csv"), append=False),
         tf.keras.callbacks.TensorBoard(log_dir=str(export_dir / "logs")),
     ]
 
-    # Keep train/val dataset iteration fully data-driven; no manual steps needed.
     model.fit(
         train_ds,
         validation_data=val_ds,
@@ -183,53 +347,48 @@ def main():
             "ModelCheckpoint may have failed before first validation pass."
         )
 
-    print("\n[train_cnn] Evaluating best model on test split...")
     best_model = tf.keras.models.load_model(str(ckpt_path))
 
-    clip_ids = []
-    y_true, y_pred, y_score = [], [], []
+    print("\n[train_cnn] Running validation inference for threshold selection...")
+    val_clip_ids, val_y_true, val_y_score = _collect_predictions(best_model, val_ds_with_id, has_clip_id=True)
 
-    for x_batch, y_batch, id_batch in test_ds:
-        probs = best_model(x_batch, training=False).numpy().flatten()
-        preds = (probs >= 0.5).astype(int)
+    chosen_threshold, val_threshold_rows = _choose_threshold_from_validation(
+        val_y_true,
+        val_y_score,
+        min_precision=min_precision,
+    )
+    val_metrics = _compute_metrics(val_y_true, val_y_score, chosen_threshold)
 
-        y_score.extend(probs.tolist())
-        y_pred.extend(preds.tolist())
-        y_true.extend(y_batch.numpy().flatten().astype(int).tolist())
-        clip_ids.extend([cid.decode("utf-8") for cid in id_batch.numpy()])
+    print(
+        "[train_cnn] Chosen validation threshold = "
+        f"{chosen_threshold:.6f} "
+        f"(precision={val_metrics['precision']:.4f}, "
+        f"recall={val_metrics['recall']:.4f}, "
+        f"f1={val_metrics['f1']:.4f})"
+    )
 
-    if len(clip_ids) != len(y_true):
-        raise ValueError(f"Mismatch: clip_ids={len(clip_ids)} y_true={len(y_true)}")
+    _save_json(export_dir / "val_metrics.json", val_metrics)
+    _write_predictions_csv(
+        export_dir / "val_predictions.csv",
+        val_clip_ids,
+        val_y_true,
+        val_y_score,
+        chosen_threshold,
+    )
+    _write_threshold_table(export_dir / "val_metrics_by_threshold.csv", val_threshold_rows)
 
-    y_true_arr = np.array(y_true)
-    y_pred_arr = np.array(y_pred)
-    y_score_arr = np.array(y_score)
-
-    tp = int(np.sum((y_true_arr == 1) & (y_pred_arr == 1)))
-    tn = int(np.sum((y_true_arr == 0) & (y_pred_arr == 0)))
-    fp = int(np.sum((y_true_arr == 0) & (y_pred_arr == 1)))
-    fn = int(np.sum((y_true_arr == 1) & (y_pred_arr == 0)))
-
-    try:
-        auc = float(roc_auc_score(y_true_arr, y_score_arr))
-    except ValueError:
-        auc = float("nan")
-
-    test_metrics = {
-        "accuracy": float(accuracy_score(y_true_arr, y_pred_arr)),
-        "precision": float(precision_score(y_true_arr, y_pred_arr, zero_division=0)),
-        "recall": float(recall_score(y_true_arr, y_pred_arr, zero_division=0)),
-        "auc": auc,
-        "confusion_matrix": {"tp": tp, "tn": tn, "fp": fp, "fn": fn},
-        "n_examples": int(len(y_true_arr)),
-    }
+    print("\n[train_cnn] Evaluating best model on test split...")
+    test_clip_ids, test_y_true, test_y_score = _collect_predictions(best_model, test_ds, has_clip_id=True)
+    test_metrics = _compute_metrics(test_y_true, test_y_score, chosen_threshold)
     _save_json(export_dir / "test_metrics.json", test_metrics)
 
-    with open(export_dir / "test_predictions.csv", "w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(["clip_wav_relpath", "y_true", "y_pred", "y_score"])
-        for cid, yt, yp, ys in zip(clip_ids, y_true_arr, y_pred_arr, y_score_arr):
-            writer.writerow([cid, int(yt), int(yp), f"{float(ys):.6f}"])
+    _write_predictions_csv(
+        export_dir / "test_predictions.csv",
+        test_clip_ids,
+        test_y_true,
+        test_y_score,
+        chosen_threshold,
+    )
 
     _validate_artifacts(
         export_dir,
@@ -238,6 +397,9 @@ def main():
             "history.csv",
             "best_model.keras",
             "final_model.keras",
+            "val_metrics.json",
+            "val_predictions.csv",
+            "val_metrics_by_threshold.csv",
             "test_metrics.json",
             "test_predictions.csv",
             "logs",
@@ -250,11 +412,19 @@ def main():
         "history.csv",
         "best_model.keras",
         "final_model.keras",
+        "val_metrics.json",
+        "val_predictions.csv",
+        "val_metrics_by_threshold.csv",
         "test_metrics.json",
         "test_predictions.csv",
         "logs/",
     ):
         print(f"  {artifact:<24} ✓")
+
+    print("\nValidation metrics:")
+    for key, value in val_metrics.items():
+        print(f"  {key}: {value}")
+
     print("\nTest metrics:")
     for key, value in test_metrics.items():
         print(f"  {key}: {value}")
