@@ -5,331 +5,260 @@
 #
 # Notes:
 # - Expects TFRecords at: data/tfrecords/<MODEL>_<TAG>/{train,val,test}.tfrecord
-# - TFRecord schema: "spec" (serialized tensor), "label" (int64)
+# - TFRecord schema: "spec" (serialized normalized tensor), "label" (int64)
 
-import os
-import json
 import csv
-import math
+import functools
+import json
+import os
 from datetime import datetime
 from pathlib import Path
 
 import numpy as np
 import tensorflow as tf
-from tensorflow.keras import layers, models, mixed_precision
-from sklearn.metrics import accuracy_score, precision_score, recall_score, roc_auc_score, confusion_matrix
+from sklearn.metrics import accuracy_score, precision_score, recall_score, roc_auc_score
 
+from elp_gunshot.cnn import CNN
 from elp_gunshot.config.paths import RUNS_DIR as DEFAULT_RUNS_DIR, TFRECORDS_ROOT
+from elp_gunshot.data_loading import (
+    SPEC_SHAPE,
+    count_examples,
+    get_class_weights,
+    make_ds,
+    parse_tfrecord_example,
+)
 
-# =========================
-# GPU CONFIG
-# =========================
-gpus = tf.config.list_physical_devices('GPU')
-if gpus:
+
+def _configure_gpu() -> bool:
+    """Enable GPU-friendly settings and return whether mixed precision is enabled."""
+    gpus = tf.config.list_physical_devices("GPU")
+    if not gpus:
+        print("[train_cnn] No GPU detected; running on CPU.")
+        return False
+
     try:
         for gpu in gpus:
             tf.config.experimental.set_memory_growth(gpu, True)
-        print("GPU detected. Memory growth enabled.")
-    except RuntimeError as e:
-        print("Error setting memory growth:", e)
-else:
-    print("No GPU detected, running on CPU.")
+        tf.keras.mixed_precision.set_global_policy("mixed_float16")
+        print(f"[train_cnn] GPU detected: {[g.name for g in gpus]} - mixed precision enabled.")
+        return True
+    except RuntimeError as err:
+        print(f"[train_cnn] Could not enable GPU memory growth: {err}")
+        return False
 
-# Enable mixed precision for Tesla T4
-mixed_precision.set_global_policy("mixed_float16")
-print("Mixed precision enabled.")
 
-# =========================
-# CONFIG
-# =========================
-MODEL = os.getenv("MODEL", "model1")    # model1 / model2 / model3
-TAG   = os.getenv("TAG", "nomask")      # nomask / bp100_1800 / etc
+def _save_json(path: Path, payload: dict) -> None:
+    with open(path, "w") as f:
+        json.dump(payload, f, indent=2)
 
-BASE_DIR = TFRECORDS_ROOT / f"{MODEL}_{TAG}"
 
-TRAIN_TF = BASE_DIR / "train.tfrecord"
-VAL_TF = BASE_DIR / "val.tfrecord"
-TEST_TF  = BASE_DIR / "test.tfrecord"
+def _validate_artifacts(export_dir: Path, required_names: list[str]) -> None:
+    missing = [name for name in required_names if not (export_dir / name).exists()]
+    if missing:
+        raise FileNotFoundError(
+            f"Run completed with missing artifacts in {export_dir}: {missing}. "
+            "Inspect training logs for failures."
+        )
 
-RUNS_DIR = Path(os.getenv("RUNS_DIR", str(DEFAULT_RUNS_DIR)))
-RUNS_DIR.mkdir(parents=True, exist_ok=True)
 
-BATCH_SIZE = 32
-#BATCH_SIZE = 64 #for best model 3 training
-EPOCHS = int(os.getenv("EPOCHS", 10))
-#EPOCHS = 30 #for best model 2 training
-#EPOCHS = 40 #for best model 3 training 
-LEARNING_RATE = 1e-4
-#LEARNING_RATE = 3e-5 #for best model 3 training 
-AUTOTUNE = tf.data.AUTOTUNE
+def main():
+    mixed_precision_enabled = _configure_gpu()
 
-SPEC_HEIGHT = 124
-SPEC_WIDTH = 129
+    # Model3 best defaults, while keeping env overrides for experiments.
+    model_name = os.getenv("MODEL", "model3")
+    tag = os.getenv("TAG", "nomask")
+    batch_size = int(os.getenv("BATCH_SIZE", 64))
+    epochs = int(os.getenv("EPOCHS", 40))
+    learning_rate = float(os.getenv("LEARNING_RATE", "3e-5"))
+    dropout_rate = float(os.getenv("DROPOUT_RATE", "0.5"))
 
-if not TRAIN_TF.exists() or not VAL_TF.exists() or not TEST_TF.exists():
-    raise FileNotFoundError(
-        f"Missing TFRecords under {BASE_DIR}\n"
-        f"Expected:\n"
-        f"  {TRAIN_TF}\n  {VAL_TF}\n  {TEST_TF}\n"
+    base_dir = TFRECORDS_ROOT / f"{model_name}_{tag}"
+    train_tf = base_dir / "train.tfrecord"
+    val_tf = base_dir / "val.tfrecord"
+    test_tf = base_dir / "test.tfrecord"
+    metadata_path = base_dir / "metadata.json"
+
+    for tfrecord_path in (train_tf, val_tf, test_tf):
+        if not tfrecord_path.exists():
+            raise FileNotFoundError(
+                f"Missing TFRecord: {tfrecord_path}. "
+                f"Expected dataset root: {base_dir}"
+            )
+
+    runs_dir = Path(os.getenv("RUNS_DIR", str(DEFAULT_RUNS_DIR)))
+    runs_dir.mkdir(parents=True, exist_ok=True)
+
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_name = f"{model_name}_{tag}_bs{batch_size}_lr{learning_rate}_e{epochs}_{ts}"
+    export_dir = runs_dir / run_name
+    export_dir.mkdir(parents=True, exist_ok=True)
+
+    print(f"\n[train_cnn] TFRecords:  {base_dir}")
+    print(f"[train_cnn] Export dir: {export_dir}\n")
+
+    parse_fn = functools.partial(parse_tfrecord_example, clip_id=False)
+    parse_with_id_fn = functools.partial(parse_tfrecord_example, clip_id=True)
+
+    train_ds = make_ds(train_tf, parse_fn, batch_size, shuffle=True, drop_remainder=False)
+    val_ds = make_ds(val_tf, parse_fn, batch_size, shuffle=False, drop_remainder=False)
+    test_ds = make_ds(test_tf, parse_with_id_fn, batch_size, shuffle=False, drop_remainder=False)
+
+    n_train = count_examples(train_tf)
+    n_val = count_examples(val_tf)
+    n_test = count_examples(test_tf)
+    print(f"[train_cnn] Examples: train={n_train}, val={n_val}, test={n_test}")
+
+    print("[train_cnn] Sample labels from one training batch:")
+    for _, batch_label in train_ds.take(1):
+        print(batch_label.numpy().flatten())
+
+    class_weights = get_class_weights(train_tf)
+    print(f"[train_cnn] class_weights = {class_weights}\n")
+
+    params = {
+        "model": model_name,
+        "tag": tag,
+        "tfrecord_dir": str(base_dir),
+        "train_tfrecord": str(train_tf),
+        "val_tfrecord": str(val_tf),
+        "test_tfrecord": str(test_tf),
+        "tfrecord_metadata": str(metadata_path) if metadata_path.exists() else None,
+        "input_shape": list(SPEC_SHAPE),
+        "batch_size": batch_size,
+        "epochs": epochs,
+        "learning_rate": learning_rate,
+        "dropout_rate": dropout_rate,
+        "class_weights": {str(k): v for k, v in class_weights.items()},
+        "mixed_precision": mixed_precision_enabled,
+    }
+
+    if metadata_path.exists():
+        params["normalization"] = json.loads(metadata_path.read_text())
+
+    _save_json(export_dir / "params.json", params)
+
+    model = CNN(input_shape=SPEC_SHAPE, dropout_rate=dropout_rate)
+    model.compile(
+        optimizer=tf.keras.optimizers.Adam(learning_rate=learning_rate),
+        loss="binary_crossentropy",
+        metrics=[
+            "accuracy",
+            tf.keras.metrics.Precision(name="precision"),
+            tf.keras.metrics.Recall(name="recall"),
+            tf.keras.metrics.AUC(name="auc"),
+        ],
     )
+    model.build((None, *SPEC_SHAPE))
+    model.summary()
 
-# Create a run name that identifies what produced it
-ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-run_name = f"{MODEL}_{TAG}_bs{BATCH_SIZE}_lr{LEARNING_RATE}_e{EPOCHS}_{ts}"
-EXPORT_DIR = RUNS_DIR / run_name
-EXPORT_DIR.mkdir(parents=True, exist_ok=True)
+    ckpt_path = export_dir / "best_model.keras"
+    callbacks = [
+        tf.keras.callbacks.ModelCheckpoint(
+            filepath=str(ckpt_path),
+            monitor="val_auc",
+            mode="max",
+            save_best_only=True,
+            verbose=1,
+        ),
+        tf.keras.callbacks.CSVLogger(str(export_dir / "history.csv"), append=False),
+        tf.keras.callbacks.TensorBoard(log_dir=str(export_dir / "logs")),
+    ]
 
-print(f"\nTFRecords:   {BASE_DIR}")
-print(f"Export dir:  {EXPORT_DIR}\n")
-
-# =========================
-# TFRecord schema
-# =========================
-feature_description = {
-    "spec": tf.io.FixedLenFeature([], tf.string),
-    "label": tf.io.FixedLenFeature([], tf.int64),
-    "clip_wav_relpath": tf.io.FixedLenFeature([], tf.string),
-}
-
-# =========================
-# TFRecord parser
-# =========================
-def parse_tfrecord(example, return_id=False):
-    parsed = tf.io.parse_single_example(example, feature_description)
-
-    spec = tf.io.parse_tensor(parsed["spec"], out_type=tf.float32)
-    # Per-example min-max normalization (simple baseline)
-    spec = (spec - tf.reduce_min(spec)) / (tf.reduce_max(spec) - tf.reduce_min(spec) + 1e-8)
-
-    if tf.rank(spec) == 2:
-        spec = tf.expand_dims(spec, axis=-1)
-    spec.set_shape([SPEC_HEIGHT, SPEC_WIDTH, 1])
-
-    label = tf.cast(parsed["label"], tf.float32)
-    label = tf.reshape(label, (1,))
-
-    if return_id:
-        return spec, label, parsed["clip_wav_relpath"]
-    return spec, label
-
-# =========================
-# Dataset loader
-# =========================
-def load_dataset(tfrecord_path, shuffle=False, repeat=False, drop_remainder=True, return_id=False):
-    ds = tf.data.TFRecordDataset(str(tfrecord_path), num_parallel_reads=AUTOTUNE)
-    ds = ds.map(
-        lambda ex: parse_tfrecord(ex, return_id=return_id),
-        num_parallel_calls=AUTOTUNE,
-    )
-    if shuffle:
-        ds = ds.shuffle(buffer_size=2000)
-    if repeat:
-        ds = ds.repeat()
-    ds = ds.batch(BATCH_SIZE, drop_remainder=drop_remainder)
-    ds = ds.prefetch(AUTOTUNE)
-    return ds
-
-# =========================
-# Count number of examples
-# =========================
-def count_examples(tfrecord_path):
-    n = 0
-    for _ in tf.data.TFRecordDataset(str(tfrecord_path)):
-        n += 1
-    return n
-
-# =========================
-# Datasets
-# =========================
-train_ds = load_dataset(TRAIN_TF, shuffle=True, repeat=False)
-val_ds = load_dataset(VAL_TF, shuffle=False, repeat=False)
-test_ds  = load_dataset(TEST_TF, shuffle=False, repeat=False, drop_remainder=False, return_id=True) # Keep last batch
-
-n_train = count_examples(TRAIN_TF)
-n_val   = count_examples(VAL_TF)
-n_test  = count_examples(TEST_TF)
-
-train_steps = math.ceil(n_train / BATCH_SIZE)
-val_steps   = math.ceil(n_val / BATCH_SIZE)
-
-print(f"Examples: train={n_train}, val={n_val}, test={n_test}")
-print(f"Steps:    train={train_steps}, val={val_steps}\n")
-
-# =========================
-# Quick label check
-# =========================
-print("Sample labels from training dataset:")
-for batch_spec, batch_label in train_ds.take(1):
-    print(batch_label.numpy().flatten())
-
-# =========================
-# Compute class weights
-# =========================
-def get_class_weights_from_tfrecord(tfrecord_path):
-    ds = tf.data.TFRecordDataset(str(tfrecord_path))
-    ds = ds.map(lambda ex: tf.io.parse_single_example(ex, {"label": tf.io.FixedLenFeature([], tf.int64)}))
-    labels = []
-    for ex in ds:
-        labels.append(int(ex["label"].numpy()))
-    counts = np.bincount(labels, minlength=2)
-    total = counts.sum()
-    if counts[0] == 0 or counts[1] == 0:
-        return {0: 1.0, 1: 1.0}
-    return {0: total / (2 * counts[0]), 1: total / (2 * counts[1])}
-
-class_weight = get_class_weights_from_tfrecord(TRAIN_TF)
-print("Class weights:", class_weight, "\n")
-
-# =========================
-# CNN MODEL
-# =========================
-model = models.Sequential([
-    layers.Input(shape=(SPEC_HEIGHT, SPEC_WIDTH, 1)),
-    layers.Conv2D(32, 3, activation="relu", padding="same"),
-    layers.BatchNormalization(),
-    layers.MaxPooling2D(2),
-
-    layers.Conv2D(64, 3, activation="relu", padding="same"),
-    layers.BatchNormalization(),
-    layers.MaxPooling2D(2),
-
-    layers.Conv2D(128, 3, activation="relu", padding="same"),
-    layers.BatchNormalization(),
-    layers.MaxPooling2D(2),
-
-    layers.GlobalAveragePooling2D(),
-    layers.Dense(256, activation="relu"),
-    layers.Dropout(0.5),
-    layers.Dense(1, activation="sigmoid", dtype='float32')
-])
-
-model.compile(
-    optimizer=tf.keras.optimizers.Adam(learning_rate=LEARNING_RATE),
-    loss="binary_crossentropy",
-    metrics=[
-        "accuracy",
-        tf.keras.metrics.Precision(name="precision"),
-        tf.keras.metrics.Recall(name="recall"),
-        tf.keras.metrics.AUC(name="auc"),
-    ],
-)
-
-model.summary()
-
-# =========================
-# Callbacks (organized logging)
-# =========================
-ckpt_path = EXPORT_DIR / "best_model.keras"
-callbacks = [
-    tf.keras.callbacks.ModelCheckpoint(
-        filepath=str(ckpt_path),
-        monitor="val_auc",
-        mode="max",
-        save_best_only=True,
+    # Keep train/val dataset iteration fully data-driven; no manual steps needed.
+    model.fit(
+        train_ds,
+        validation_data=val_ds,
+        epochs=epochs,
+        class_weight=class_weights,
+        callbacks=callbacks,
         verbose=1,
-    ),
-    tf.keras.callbacks.CSVLogger(str(EXPORT_DIR / "history.csv"), append=False),
-    tf.keras.callbacks.TensorBoard(log_dir=str(EXPORT_DIR / "logs")),
-]
+    )
 
-# =========================
-# Save run params up front
-# =========================
-run_params = {
-    "model": MODEL,
-    "tag": TAG,
-    "tfrecord_dir": str(BASE_DIR),
-    "train_tfrecord": str(TRAIN_TF),
-    "val_tfrecord": str(VAL_TF),
-    "test_tfrecord": str(TEST_TF),
-    "spec_shape": [SPEC_HEIGHT, SPEC_WIDTH, 1],
-    "batch_size": BATCH_SIZE,
-    "epochs": EPOCHS,
-    "learning_rate": LEARNING_RATE,
-    "class_weight": class_weight,
-    "mixed_precision": True,
-}
-with open(EXPORT_DIR / "params.json", "w") as f:
-    json.dump(run_params, f, indent=2)
+    final_model_path = export_dir / "final_model.keras"
+    model.save(str(final_model_path))
 
-# =========================
-# Train
-# =========================
-history = model.fit(
-    train_ds,
-    validation_data=val_ds,
-    epochs=EPOCHS,
-    steps_per_epoch=train_steps,
-    validation_steps=val_steps,
-    class_weight=class_weight,
-    callbacks=callbacks,
-)
+    if not ckpt_path.exists():
+        raise FileNotFoundError(
+            f"Expected best checkpoint not found: {ckpt_path}. "
+            "ModelCheckpoint may have failed before first validation pass."
+        )
 
-# =========================
-# Test evaluation + save predictions
-# =========================
-print("\nEvaluating best model (from checkpoint) on TEST set...")
+    print("\n[train_cnn] Evaluating best model on test split...")
+    best_model = tf.keras.models.load_model(str(ckpt_path))
 
-model = tf.keras.models.load_model(str(ckpt_path))
+    clip_ids = []
+    y_true, y_pred, y_score = [], [], []
 
-# Collect predictions and true labels
-clip_ids = []
-y_true, y_pred, y_score = [], [], []
+    for x_batch, y_batch, id_batch in test_ds:
+        probs = best_model(x_batch, training=False).numpy().flatten()
+        preds = (probs >= 0.5).astype(int)
 
-for batch_spec, batch_label, batch_clip_rel in test_ds:
-    probs = model.predict(batch_spec, verbose=0).flatten()
-    preds = (probs > 0.5).astype(int)
+        y_score.extend(probs.tolist())
+        y_pred.extend(preds.tolist())
+        y_true.extend(y_batch.numpy().flatten().astype(int).tolist())
+        clip_ids.extend([cid.decode("utf-8") for cid in id_batch.numpy()])
 
-    y_score.extend(probs.tolist())
-    y_pred.extend(preds.tolist())
-    y_true.extend(batch_label.numpy().flatten().astype(int).tolist())
+    if len(clip_ids) != len(y_true):
+        raise ValueError(f"Mismatch: clip_ids={len(clip_ids)} y_true={len(y_true)}")
 
-    clip_ids.extend([x.decode("utf-8") for x in batch_clip_rel.numpy()])
+    y_true_arr = np.array(y_true)
+    y_pred_arr = np.array(y_pred)
+    y_score_arr = np.array(y_score)
 
-y_true = np.array(y_true)
-y_pred = np.array(y_pred)
-y_score = np.array(y_score)
+    tp = int(np.sum((y_true_arr == 1) & (y_pred_arr == 1)))
+    tn = int(np.sum((y_true_arr == 0) & (y_pred_arr == 0)))
+    fp = int(np.sum((y_true_arr == 0) & (y_pred_arr == 1)))
+    fn = int(np.sum((y_true_arr == 1) & (y_pred_arr == 0)))
 
-assert len(clip_ids) == len(y_true), f"Mismatch: clip_ids={len(clip_ids)} y_true={len(y_true)}"
+    try:
+        auc = float(roc_auc_score(y_true_arr, y_score_arr))
+    except ValueError:
+        auc = float("nan")
 
-# Compute metrics
-try:
-    auc = float(roc_auc_score(y_true, y_score))
-except ValueError:
-    auc = float("nan")
+    test_metrics = {
+        "accuracy": float(accuracy_score(y_true_arr, y_pred_arr)),
+        "precision": float(precision_score(y_true_arr, y_pred_arr, zero_division=0)),
+        "recall": float(recall_score(y_true_arr, y_pred_arr, zero_division=0)),
+        "auc": auc,
+        "confusion_matrix": {"tp": tp, "tn": tn, "fp": fp, "fn": fn},
+        "n_examples": int(len(y_true_arr)),
+    }
+    _save_json(export_dir / "test_metrics.json", test_metrics)
 
-test_metrics = {
-    "accuracy": float(accuracy_score(y_true, y_pred)),
-    "precision": float(precision_score(y_true, y_pred, zero_division=0)),
-    "recall": float(recall_score(y_true, y_pred, zero_division=0)),
-    "auc": auc,
-    "confusion_matrix": confusion_matrix(y_true, y_pred).tolist(),
-    "num_test_examples": int(len(y_true)),
-}
+    with open(export_dir / "test_predictions.csv", "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["clip_wav_relpath", "y_true", "y_pred", "y_score"])
+        for cid, yt, yp, ys in zip(clip_ids, y_true_arr, y_pred_arr, y_score_arr):
+            writer.writerow([cid, int(yt), int(yp), f"{float(ys):.6f}"])
+
+    _validate_artifacts(
+        export_dir,
+        [
+            "params.json",
+            "history.csv",
+            "best_model.keras",
+            "final_model.keras",
+            "test_metrics.json",
+            "test_predictions.csv",
+            "logs",
+        ],
+    )
+
+    print(f"\n[train_cnn] Run complete: {export_dir}")
+    for artifact in (
+        "params.json",
+        "history.csv",
+        "best_model.keras",
+        "final_model.keras",
+        "test_metrics.json",
+        "test_predictions.csv",
+        "logs/",
+    ):
+        print(f"  {artifact:<24} ✓")
+    print("\nTest metrics:")
+    for key, value in test_metrics.items():
+        print(f"  {key}: {value}")
 
 
-with open(EXPORT_DIR / "test_metrics.json", "w") as f:
-    json.dump(test_metrics, f, indent=2)
-
-with open(EXPORT_DIR / "test_predictions.csv", "w", newline="") as f:
-    w = csv.writer(f)
-    w.writerow(["clip_wav_relpath", "y_true", "y_pred", "y_score"])
-    for cid, yt, yp, ys in zip(clip_ids, y_true, y_pred, y_score):
-        w.writerow([cid, int(yt), int(yp), float(ys)])
-
-print("Test metrics:")
-for k, v in test_metrics.items():
-    print(f"  {k}: {v}")
-
-# =========================
-# Save final model
-# =========================
-final_model_path = EXPORT_DIR / "final_model.keras"
-model.save(str(final_model_path))
-print("\nSaved:")
-print("  params:          ", EXPORT_DIR / "params.json")
-print("  history:         ", EXPORT_DIR / "history.csv")
-print("  best_model:      ", ckpt_path)
-print("  test_metrics:    ", EXPORT_DIR / "test_metrics.json")
-print("  test_predictions:", EXPORT_DIR / "test_predictions.csv")
-print("  final_model:     ", final_model_path)
+if __name__ == "__main__":
+    main()

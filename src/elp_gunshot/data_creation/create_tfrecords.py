@@ -12,10 +12,13 @@
 #   MODEL=model3 MASK=bp100_1800 python -m elp_gunshot.data_creation.create_tfrecords
 #   MASK=bp150_1600 python -m elp_gunshot.data_creation.create_tfrecords
 
+import os
+import json
+import math
+import re
+
 import pandas as pd
 import tensorflow as tf
-import os
-import re
 
 from elp_gunshot.config.paths import SPLITS_DIR, TFRECORDS_ROOT, WAV_CLIPS_ROOT
 
@@ -190,59 +193,157 @@ def serialize_example(spec: tf.Tensor, label: int, location: str, clip_rel: str)
     return example.SerializeToString()
 
 
-# -----------------------
-# Main
-# -----------------------
-if not SPLITS_CSV.exists():
-    raise FileNotFoundError(f"Missing split CSV: {SPLITS_CSV}")
-
-df = pd.read_csv(SPLITS_CSV)
-required = {"split", "label", "location", "clip_wav_relpath"}
-missing = required - set(df.columns)
-if missing:
-    raise ValueError(f"{SPLITS_CSV} missing columns: {sorted(missing)}")
-
-writers = {
-    "train": tf.io.TFRecordWriter(str(OUT_DIR / "train.tfrecord")),
-    "val": tf.io.TFRecordWriter(str(OUT_DIR / "val.tfrecord")),
-    "test": tf.io.TFRecordWriter(str(OUT_DIR / "test.tfrecord")),
-}
-
-counts = {"train": 0, "val": 0, "test": 0}
-skipped_missing = 0
-skipped_bad_sr = 0
-
-for _, row in df.iterrows():
+def _row_to_entry(row) -> dict | None:
     split = str(row["split"])
-    if split not in writers:
-        continue
+    if split not in {"train", "val", "test"}:
+        return None
 
     label_str = str(row["label"])
     if label_str not in LABEL_MAP:
-        continue
-    label = LABEL_MAP[label_str]
+        return None
 
-    location = str(row["location"])
     clip_rel = str(row["clip_wav_relpath"])
     clip_path = WAV_CLIPS_ROOT / clip_rel
-
     if not clip_path.exists():
-        skipped_missing += 1
-        continue
+        return None
+
+    return {
+        "split": split,
+        "label": LABEL_MAP[label_str],
+        "location": str(row["location"]),
+        "clip_rel": clip_rel,
+        "clip_path": str(clip_path),
+    }
+
+
+def _compute_train_spec_stats(train_entries: list[dict]) -> tuple[float, float, int]:
+    """Compute global mean/std from train split spectrogram bins only."""
+    total_sum = 0.0
+    total_sum_sq = 0.0
+    total_count = 0
+    skipped_bad_sr = 0
+
+    for entry in train_entries:
+        try:
+            spec = wav_to_logspec(entry["clip_path"])
+        except ValueError:
+            skipped_bad_sr += 1
+            continue
+
+        spec64 = tf.cast(spec, tf.float64)
+        total_sum += float(tf.reduce_sum(spec64).numpy())
+        total_sum_sq += float(tf.reduce_sum(tf.square(spec64)).numpy())
+        total_count += int(tf.size(spec64).numpy())
+
+    if total_count == 0:
+        raise ValueError("Cannot compute normalization stats: no valid training spectrograms were found.")
+
+    mean = total_sum / total_count
+    variance = max((total_sum_sq / total_count) - (mean * mean), 1e-12)
+    std = math.sqrt(variance)
+    return mean, std, skipped_bad_sr
+
+
+def _write_split_records(
+    split_name: str,
+    entries: list[dict],
+    writer: tf.io.TFRecordWriter,
+    spec_mean: float,
+    spec_std: float,
+) -> tuple[int, int]:
+    """Write normalized spectrogram records for a single split."""
+    written = 0
+    skipped_bad_sr = 0
+
+    for entry in entries:
+        try:
+            spec = wav_to_logspec(entry["clip_path"])
+        except ValueError:
+            skipped_bad_sr += 1
+            continue
+
+        spec = (spec - spec_mean) / spec_std
+        writer.write(serialize_example(spec, entry["label"], entry["location"], entry["clip_rel"]))
+        written += 1
+
+    print(f"Wrote {written} examples for split '{split_name}'.")
+    return written, skipped_bad_sr
+
+
+def main():
+    if not SPLITS_CSV.exists():
+        raise FileNotFoundError(f"Missing split CSV: {SPLITS_CSV}")
+
+    df = pd.read_csv(SPLITS_CSV)
+    required = {"split", "label", "location", "clip_wav_relpath"}
+    missing = required - set(df.columns)
+    if missing:
+        raise ValueError(f"{SPLITS_CSV} missing columns: {sorted(missing)}")
+
+    entries = []
+    skipped_missing = 0
+    for _, row in df.iterrows():
+        entry = _row_to_entry(row)
+        if entry is None:
+            clip_rel = str(row.get("clip_wav_relpath", ""))
+            if clip_rel and not (WAV_CLIPS_ROOT / clip_rel).exists():
+                skipped_missing += 1
+            continue
+        entries.append(entry)
+
+    train_entries = [e for e in entries if e["split"] == "train"]
+    val_entries = [e for e in entries if e["split"] == "val"]
+    test_entries = [e for e in entries if e["split"] == "test"]
+
+    # First pass over train split computes normalization stats; second pass writes normalized records.
+    spec_mean, spec_std, skipped_bad_sr_stats = _compute_train_spec_stats(train_entries)
+
+    writers = {
+        "train": tf.io.TFRecordWriter(str(OUT_DIR / "train.tfrecord")),
+        "val": tf.io.TFRecordWriter(str(OUT_DIR / "val.tfrecord")),
+        "test": tf.io.TFRecordWriter(str(OUT_DIR / "test.tfrecord")),
+    }
 
     try:
-        spec = wav_to_logspec(str(clip_path))
-    except ValueError:
-        skipped_bad_sr += 1
-        continue
+        train_written, skipped_train = _write_split_records(
+            "train", train_entries, writers["train"], spec_mean, spec_std
+        )
+        val_written, skipped_val = _write_split_records(
+            "val", val_entries, writers["val"], spec_mean, spec_std
+        )
+        test_written, skipped_test = _write_split_records(
+            "test", test_entries, writers["test"], spec_mean, spec_std
+        )
+    finally:
+        for writer in writers.values():
+            writer.close()
 
-    writers[split].write(serialize_example(spec, label, location, clip_rel))
-    counts[split] += 1
+    metadata = {
+        "model": MODEL,
+        "mask": MASK,
+        "tag": tag,
+        "target_sr": TARGET_SR,
+        "clip_len_s": CLIP_LEN_S,
+        "frame_length": FRAME_LENGTH,
+        "frame_step": FRAME_STEP,
+        "fft_length": FFT_LENGTH,
+        "spec_norm_mean": spec_mean,
+        "spec_norm_std": spec_std,
+        "counts": {"train": train_written, "val": val_written, "test": test_written},
+    }
 
-for w in writers.values():
-    w.close()
+    with open(OUT_DIR / "metadata.json", "w") as f:
+        json.dump(metadata, f, indent=2)
 
-print(f"\nTFRecords written to: {OUT_DIR}")
-print("Counts:", counts)
-print("Skipped missing wav clips:", skipped_missing)
-print("Skipped unsupported sample rate:", skipped_bad_sr)
+    skipped_bad_sr_total = skipped_bad_sr_stats + skipped_train + skipped_val + skipped_test
+
+    print(f"\nTFRecords written to: {OUT_DIR}")
+    print("Counts:", metadata["counts"])
+    print("Skipped missing wav clips:", skipped_missing)
+    print("Skipped unsupported sample rate:", skipped_bad_sr_total)
+    print(f"Normalization stats (train split): mean={spec_mean:.6f}, std={spec_std:.6f}")
+    print(f"Metadata written to: {OUT_DIR / 'metadata.json'}")
+
+
+if __name__ == "__main__":
+    main()
