@@ -4,13 +4,11 @@
 from pathlib import Path
 import pandas as pd
 import numpy as np
+from elp_gunshot.config.paths import CLIPS_PLAN_CSV, SPLITS_DIR
 
 # -----------------------
-# Paths
+# Paths (centralized in config.paths)
 # -----------------------
-HERE = Path(__file__).resolve().parent
-PLAN_CSV = HERE / "clips_plan.csv"
-SPLITS_DIR = HERE / "splits"
 SPLITS_DIR.mkdir(parents=True, exist_ok=True)
 
 # -----------------------
@@ -34,15 +32,15 @@ MODEL3_FRAC = 1.0
 # -----------------------
 # Load clip plan
 # -----------------------
-if not PLAN_CSV.exists():
-    raise FileNotFoundError(f"Missing {PLAN_CSV}. Run create_clips_plan.py first.")
+if not CLIPS_PLAN_CSV.exists():
+    raise FileNotFoundError(f"Missing {CLIPS_PLAN_CSV}. Run create_clips_plan.py first.")
 
-plan = pd.read_csv(PLAN_CSV)
+plan = pd.read_csv(CLIPS_PLAN_CSV)
 
 required = {"label", "location", "source_wav_relpath", "clip_wav_relpath"}
 missing = required - set(plan.columns)
 if missing:
-    raise ValueError(f"clip_plan.csv missing columns: {sorted(missing)}")
+    raise ValueError(f"clips_plan.csv missing columns: {sorted(missing)}")
 
 # -----------------------
 # Helper functions

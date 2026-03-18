@@ -6,7 +6,16 @@ import pandas as pd
 import wave
 from pathlib import Path
 
-from elp_gunshot.config.paths import *
+from elp_gunshot.config.paths import (
+    CLIPS_PLAN_CSV,
+    ECOGUNS_METADATA,
+    ECOGUNS_SOUNDS,
+    KORUP_METADATA,
+    KORUP_SOUNDS,
+    PNNN_METADATA,
+    PNNN_SOUNDS,
+    RAW_ROOT,
+)
 
 # -----------------------
 # Settings
@@ -19,16 +28,13 @@ BUFFER_S = 10.0         # negatives must be >=10s away from any positive window
 NEG_PER_POS = 3         # per saved positive, per WAV
 RNG = np.random.default_rng(0)
 
-# Save clips plan next to the creation scripts (committed file)
-PLAN_CSV = Path(__file__).resolve().parent / "clips_plan.csv"
-
 # -----------------------
 # Safety check: clip plan overwrite
 # -----------------------
-if PLAN_CSV.exists():
+if CLIPS_PLAN_CSV.exists():
     raise RuntimeError(
-        f"\n⚠️  clip_plan.csv already exists at:\n"
-        f"    {PLAN_CSV}\n\n"
+        f"\n⚠️  clips_plan.csv already exists at:\n"
+        f"    {CLIPS_PLAN_CSV}\n\n"
         f"This file is the source of truth for clip generation and is shared\n"
         f"across the team. Re-creating it will require everyone to re-cut\n"
         f"WAV clips and rebuild downstream artifacts (splits, TFRecords).\n\n"
@@ -183,8 +189,8 @@ for location, metadata_path, sounds_dir in datasets:
 # -----------------------
 plan_df = pd.DataFrame(rows)
 
-PLAN_CSV.parent.mkdir(parents=True, exist_ok=True)
-plan_df.to_csv(PLAN_CSV, index=False)
+CLIPS_PLAN_CSV.parent.mkdir(parents=True, exist_ok=True)
+plan_df.to_csv(CLIPS_PLAN_CSV, index=False)
 
-print(f"\nWrote plan: {PLAN_CSV}")
+print(f"\nWrote plan: {CLIPS_PLAN_CSV}")
 print(f"Total planned clips: {len(plan_df)}")

@@ -12,13 +12,12 @@
 #   MODEL=model3 MASK=bp100_1800 python -m elp_gunshot.data_creation.create_tfrecords
 #   MASK=bp150_1600 python -m elp_gunshot.data_creation.create_tfrecords
 
-from pathlib import Path
 import pandas as pd
 import tensorflow as tf
 import os
 import re
 
-from elp_gunshot.config.paths import *
+from elp_gunshot.config.paths import SPLITS_DIR, TFRECORDS_ROOT, WAV_CLIPS_ROOT
 
 # -----------------------
 # CONFIG
@@ -81,7 +80,7 @@ tag = "nomask" if not cfg.get("mask", False) else f"bp{int(cfg['low_hz'])}_{int(
 OUT_DIR = TFRECORDS_ROOT / f"{MODEL}_{tag}"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-SPLITS_CSV = Path(__file__).resolve().parent / "splits" / f"{MODEL}.csv"
+SPLITS_CSV = SPLITS_DIR / f"{MODEL}.csv"
 
 LABEL_MAP = {"neg": 0, "pos": 1}
 

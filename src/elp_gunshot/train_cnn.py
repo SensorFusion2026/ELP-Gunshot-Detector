@@ -19,7 +19,7 @@ import tensorflow as tf
 from tensorflow.keras import layers, models, mixed_precision
 from sklearn.metrics import accuracy_score, precision_score, recall_score, roc_auc_score, confusion_matrix
 
-from elp_gunshot.config.paths import TFRECORDS_ROOT
+from elp_gunshot.config.paths import RUNS_DIR as DEFAULT_RUNS_DIR, TFRECORDS_ROOT
 
 # =========================
 # GPU CONFIG
@@ -51,7 +51,7 @@ TRAIN_TF = BASE_DIR / "train.tfrecord"
 VAL_TF = BASE_DIR / "val.tfrecord"
 TEST_TF  = BASE_DIR / "test.tfrecord"
 
-RUNS_DIR = Path(os.getenv("RUNS_DIR", "runs"))       # local run outputs (not TFRecord dir)
+RUNS_DIR = Path(os.getenv("RUNS_DIR", str(DEFAULT_RUNS_DIR)))
 RUNS_DIR.mkdir(exist_ok=True)
 
 BATCH_SIZE = 32
