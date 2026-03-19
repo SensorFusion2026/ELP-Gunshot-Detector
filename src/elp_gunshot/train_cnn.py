@@ -5,8 +5,9 @@
 #
 # Notes:
 # - Expects TFRecords at: data/tfrecords/<MODEL>_<TAG>/{train,val,test}.tfrecord
-# - TFRecord schema: "spec" (serialized normalized tensor), "label" (int64)
-
+# - TFRecord schema (fields read here): "spec" (serialized normalized tensor), "label" (int64).
+#   TFRecords written by data_creation/create_tfrecords.py may include additional metadata fields
+#   (e.g. clip_wav_relpath, clip id), which are currently ignored by this trainer.
 import csv
 import functools
 import json
@@ -102,18 +103,27 @@ def _confusion_dict(y_true_arr: np.ndarray, y_pred_arr: np.ndarray) -> dict:
     return {"tp": tp, "tn": tn, "fp": fp, "fn": fn}
 
 
-def _compute_metrics(y_true_arr: np.ndarray, y_score_arr: np.ndarray, threshold: float) -> dict:
+def _compute_metrics(
+    y_true_arr: np.ndarray,
+    y_score_arr: np.ndarray,
+    threshold: float,
+    auc: float | None = None,
+    bce_loss: float | None = None,
+) -> dict:
     y_pred_arr = (y_score_arr >= threshold).astype(int)
 
-    try:
-        auc = float(roc_auc_score(y_true_arr, y_score_arr))
-    except ValueError:
-        auc = float("nan")
+    if auc is None:
+        try:
+            auc = float(roc_auc_score(y_true_arr, y_score_arr))
+        except ValueError:
+            auc = float("nan")
+    if bce_loss is None:
+        bce_loss = float(_BCE_LOSS(y_true_arr, y_score_arr).numpy())
 
     metrics = {
         "threshold": float(threshold),
         "accuracy": float(accuracy_score(y_true_arr, y_pred_arr)),
-        "bce_loss": float(_BCE_LOSS(y_true_arr, y_score_arr).numpy()),
+        "bce_loss": bce_loss,
         "precision": float(precision_score(y_true_arr, y_pred_arr, zero_division=0)),
         "recall": float(recall_score(y_true_arr, y_pred_arr, zero_division=0)),
         "auc": auc,
@@ -144,14 +154,30 @@ def _choose_threshold_from_validation(
     candidate_rows = []
     threshold_values = np.linspace(0.0, 1.0, num=101)
 
+    # Compute threshold-independent metrics once
+    try:
+        auc = float(roc_auc_score(y_true_arr, y_score_arr))
+    except ValueError:
+        auc = float("nan")
+    bce_loss = float(_BCE_LOSS(y_true_arr, y_score_arr).numpy())
+
     for threshold in threshold_values:
-        metrics = _compute_metrics(y_true_arr, y_score_arr, float(threshold))
+        metrics = _compute_metrics(
+            y_true_arr,
+            y_score_arr,
+            float(threshold),
+            auc=auc,
+            bce_loss=bce_loss,
+        )
         candidate_rows.append(metrics)
 
     valid = [row for row in candidate_rows if row["precision"] >= min_precision]
 
     if valid:
-        best = max(valid, key=lambda row: (row["recall"], row["f1"], -abs(row["threshold"] - 0.5)),)
+        best = max(
+            valid,
+            key=lambda row: (row["recall"], row["f1"], -abs(row["threshold"] - 0.5)),
+        )
     else:
         best = max(candidate_rows, key=lambda row: (row["f1"], row["recall"]))
 
