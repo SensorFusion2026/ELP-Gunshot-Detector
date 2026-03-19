@@ -4,7 +4,7 @@ Generate publication-quality figures from a completed gunshot CNN training run.
 
 Usage:
     python -m elp_gunshot.evaluate_cnn --run_dir runs/model3_nomask_bs64_lr3e-05_e40_20260318_120000
-    python -m elp_gunshot.evaluate_cnn --run_dir runs/... --output_dir results/figures/
+    python -m elp_gunshot.evaluate_cnn --run_dir runs/... --output_dir results/
 """
 
 import argparse
@@ -88,7 +88,7 @@ def plot_confusion_matrix(cm: dict, output_dir: Path) -> None:
             count = matrix[i, j]
             pct = 100.0 * count / total
             color = "white" if count > thresh else "black"
-            ax.text(j, i, f"{count}\\n({pct:.1f}%)", ha="center", va="center", color=color)
+            ax.text(j, i, f"{count}\n({pct:.1f}%)", ha="center", va="center", color=color)
 
     fig.tight_layout()
     save_fig(fig, output_dir, "confusion_matrix")
@@ -150,7 +150,8 @@ def plot_pr_curve(preds_df: pd.DataFrame, output_dir: Path) -> None:
     ax.set_xlabel("Recall")
     ax.set_ylabel("Precision")
     ax.set_title("Precision-Recall Curve")
-    ax.legend(loc="upper right")
+    # Keep legend off the plotted curve to avoid obscuring precision-recall shape.
+    ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), borderaxespad=0.0)
     ax.grid(True, linestyle="--", alpha=0.5)
     ax.set_xlim([0.0, 1.0])
     ax.set_ylim([0.0, 1.05])
@@ -165,13 +166,14 @@ def main():
     parser.add_argument(
         "--output_dir",
         type=Path,
-        default=Path("results/figures"),
-        help="Directory to write figures (default: results/figures)",
+        default=Path("results"),
+        help="Base directory to write figures (default: results)",
     )
     args = parser.parse_args()
 
     run_dir: Path = args.run_dir
-    output_dir: Path = args.output_dir
+    # Always write to a run-specific folder so results do not overwrite each other.
+    output_dir: Path = args.output_dir / run_dir.name
 
     history_path = run_dir / "history.csv"
     metrics_path = run_dir / "test_metrics.json"
