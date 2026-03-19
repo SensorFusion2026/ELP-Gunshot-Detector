@@ -92,6 +92,12 @@ Output:
 data/tfrecords/<MODEL>_<MASK>/{train,val,test}.tfrecord
 ```
 
+Each TFRecord generation run also writes:
+```
+data/tfrecords/<MODEL>_<MASK>/metadata.json
+```
+with train-split spectrogram normalization stats (`spec_norm_mean`, `spec_norm_std`) and preprocessing settings.
+
 ---
 
 ## Model Training via SDSC Expanse
@@ -205,13 +211,45 @@ scancel <job_id>
 ## Training (Local)
 
 ```bash
-MODEL=model1 python -m elp_gunshot.train_cnn
+python -m elp_gunshot.train_cnn
 ```
+
+Default training settings (model3 bests):
+- `MODEL=model3`
+- `TAG=nomask`
+- `BATCH_SIZE=64`
+- `EPOCHS=40`
+- `LEARNING_RATE=3e-5`
 
 Override epoch count (useful for quick smoke-tests):
 
 ```bash
-MODEL=model1 EPOCHS=2 python -m elp_gunshot.train_cnn
+MODEL=model1 TAG=bp100_1800 EPOCHS=2 python -m elp_gunshot.train_cnn
+```
+
+Additional overrides:
+- `BATCH_SIZE=<int>`
+- `LEARNING_RATE=<float>`
+- `DROPOUT_RATE=<float>`
+
+## Evaluation
+
+Generate publication-quality figures from a completed run:
+
+```bash
+python -m elp_gunshot.evaluate_cnn --run_dir runs/<run_name>
+```
+
+Optional output directory override:
+
+```bash
+python -m elp_gunshot.evaluate_cnn --run_dir runs/<run_name> --output_dir results/figures
+```
+
+Display-only notebook:
+
+```
+notebooks/cnn_results.ipynb
 ```
 
 ---
@@ -231,9 +269,12 @@ Includes:
 | `params.json` | All hyperparameters, TFRecord paths, class weights |
 | `history.csv` | Per-epoch loss, accuracy, precision, recall, AUC (train + val) |
 | `best_model.keras` | Best checkpoint (monitored by val AUC) |
-| `final_model.keras` | Last-epoch model |
-| `test_metrics.json` | Test-set accuracy, precision, recall, AUC, confusion matrix |
-| `test_predictions.csv` | Per-clip: `clip_wav_relpath`, `y_true`, `y_pred`, `y_score` |
+| `final_model.keras` | Final in-memory model state after training (with `EarlyStopping(restore_best_weights=True)`, this is typically best validation weights when early stop triggers) |
+| `val_metrics.json` | Validation-set metrics at chosen operating threshold |
+| `val_predictions.csv` | Validation per-clip predictions with selected threshold |
+| `val_metrics_by_threshold.csv` | Validation precision/recall/F1 summary across candidate thresholds |
+| `test_metrics.json` | Test-set accuracy, precision, recall, AUC, and confusion matrix keys `tp/tn/fp/fn` |
+| `test_predictions.csv` | Per-clip: `clip_wav_relpath`, `y_true`, `y_pred`, `y_score`, `threshold` |
 | `logs/` | TensorBoard event files |
 
 ---
