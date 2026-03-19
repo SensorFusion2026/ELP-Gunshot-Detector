@@ -100,6 +100,24 @@ def plot_roc_curve(preds_df: pd.DataFrame, output_dir: Path) -> None:
     y_true = preds_df["y_true"].values
     y_score = preds_df["y_score"].values
 
+    # ROC is undefined when y_true contains only one class; handle gracefully.
+    unique_classes = np.unique(y_true)
+    if unique_classes.size < 2:
+        fig, ax = plt.subplots(figsize=(6, 5))
+        ax.text(
+            0.5,
+            0.5,
+            "ROC curve undefined:\nonly one class present in y_true",
+            ha="center",
+            va="center",
+            fontsize=12,
+            wrap=True,
+        )
+        ax.set_axis_off()
+        fig.tight_layout()
+        save_fig(fig, output_dir, "roc_curve")
+        return
+
     fpr, tpr, _ = roc_curve(y_true, y_score)
     auc = roc_auc_score(y_true, y_score)
 

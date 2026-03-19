@@ -198,10 +198,10 @@ def _write_predictions_csv(
         writer.writerow(["clip_wav_relpath", "y_true", "y_pred", "y_score", "threshold"])
         if clip_ids is None:
             for idx, (yt, yp, ys) in enumerate(zip(y_true_arr, y_pred_arr, y_score_arr)):
-                writer.writerow([f"example_{idx}", int(yt), int(yp), f"{float(ys):.6f}", f"{threshold:.6f}"])
+                writer.writerow([f"example_{idx}", int(yt), int(yp), repr(float(ys)), repr(float(threshold))])
         else:
             for cid, yt, yp, ys in zip(clip_ids, y_true_arr, y_pred_arr, y_score_arr):
-                writer.writerow([cid, int(yt), int(yp), f"{float(ys):.6f}", f"{threshold:.6f}"])
+                writer.writerow([cid, int(yt), int(yp), repr(float(ys)), repr(float(threshold))])
 
 
 def _write_threshold_table(path: Path, rows: list[dict]) -> None:
@@ -214,12 +214,12 @@ def _write_threshold_table(path: Path, rows: list[dict]) -> None:
             cm = row["confusion_matrix"]
             writer.writerow(
                 [
-                    f"{row['threshold']:.6f}",
-                    f"{row['accuracy']:.6f}",
-                    f"{row['precision']:.6f}",
-                    f"{row['recall']:.6f}",
-                    f"{row['f1']:.6f}",
-                    f"{row['auc']:.6f}" if not np.isnan(row["auc"]) else "nan",
+                    repr(float(row["threshold"])),
+                    repr(float(row["accuracy"])),
+                    repr(float(row["precision"])),
+                    repr(float(row["recall"])),
+                    repr(float(row["f1"])),
+                    repr(float(row["auc"])) if not np.isnan(row["auc"]) else "nan",
                     cm["tp"],
                     cm["tn"],
                     cm["fp"],

@@ -119,20 +119,21 @@ def wav_to_logspec(wav_path: str) -> tf.Tensor:
     audio = tf.squeeze(audio, axis=-1)
 
     sr = tf.cast(sr, tf.int32)
+    sr_hz = int(sr.numpy())
 
     # Standardize sample rate to 4kHz:
     # - if 8kHz: take every other sample (2x downsample)
     # - if 4kHz: leave as-is
-    if sr == 8000:
+    if sr_hz == 8000:
         audio = audio[::2]
-        sr = 4000
-    elif sr != 4000:
-        raise ValueError(f"Unsupported sample rate {int(sr.numpy())} for {wav_path}")
+        sr_hz = 4000
+    elif sr_hz != 4000:
+        raise ValueError(f"Unsupported sample rate {sr_hz} for {wav_path}")
 
     # Force fixed length (4s @ 4kHz)
-    n = tf.shape(audio)[0]
-    if n < EXPECTED_SAMPLES:
-        audio = tf.pad(audio, [[0, EXPECTED_SAMPLES - n]])
+    n_samples = int(tf.shape(audio)[0].numpy())
+    if n_samples < EXPECTED_SAMPLES:
+        audio = tf.pad(audio, [[0, EXPECTED_SAMPLES - n_samples]])
     else:
         audio = audio[:EXPECTED_SAMPLES]
 
