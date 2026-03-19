@@ -335,12 +335,13 @@ def main():
     with open(OUT_DIR / "metadata.json", "w") as f:
         json.dump(metadata, f, indent=2)
 
-    skipped_bad_sr_total = skipped_bad_sr_stats + skipped_train + skipped_val + skipped_test
+    skipped_bad_sr_total = skipped_train + skipped_val + skipped_test
 
     print(f"\nTFRecords written to: {OUT_DIR}")
     print("Counts:", metadata["counts"])
     print("Skipped missing wav clips:", skipped_missing)
-    print("Skipped unsupported sample rate:", skipped_bad_sr_total)
+    print("Skipped unsupported sample rate (stats pass, train split):", skipped_bad_sr_stats)
+    print("Skipped unsupported sample rate (write pass, all splits):", skipped_bad_sr_total)
     print(f"Normalization stats (train split): mean={spec_mean:.6f}, std={spec_std:.6f}")
     print(f"Metadata written to: {OUT_DIR / 'metadata.json'}")
 

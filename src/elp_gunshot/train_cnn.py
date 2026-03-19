@@ -18,7 +18,6 @@ import numpy as np
 import tensorflow as tf
 from sklearn.metrics import (
     accuracy_score,
-    precision_recall_curve,
     precision_score,
     recall_score,
     roc_auc_score,
@@ -34,6 +33,7 @@ from elp_gunshot.data_loading import (
     parse_tfrecord_example,
 )
 
+_BCE_LOSS = tf.keras.losses.BinaryCrossentropy()
 
 def _configure_gpu() -> bool:
     """Enable GPU-friendly settings and return whether mixed precision is enabled."""
@@ -110,13 +110,10 @@ def _compute_metrics(y_true_arr: np.ndarray, y_score_arr: np.ndarray, threshold:
     except ValueError:
         auc = float("nan")
 
-    bce = tf.keras.losses.BinaryCrossentropy()
-
-
     metrics = {
         "threshold": float(threshold),
         "accuracy": float(accuracy_score(y_true_arr, y_pred_arr)),
-        "bce_loss": float(bce(y_true_arr, y_score_arr).numpy()),
+        "bce_loss": float(_BCE_LOSS(y_true_arr, y_score_arr).numpy()),
         "precision": float(precision_score(y_true_arr, y_pred_arr, zero_division=0)),
         "recall": float(recall_score(y_true_arr, y_pred_arr, zero_division=0)),
         "auc": auc,
@@ -143,7 +140,6 @@ def _choose_threshold_from_validation(
     - tie-break by F1
     - if none satisfy precision floor, maximize F1
     """
-    # precisions, recalls, thresholds = precision_recall_curve(y_true_arr, y_score_arr)
 
     candidate_rows = []
     threshold_values = np.linspace(0.0, 1.0, num=101)

@@ -2,7 +2,7 @@
 """Shared TFRecord loading utilities for gunshot CNN training."""
 
 from pathlib import Path
-
+import os
 import tensorflow as tf
 
 SPEC_SHAPE = (124, 129, 1)
@@ -58,12 +58,22 @@ def get_class_weights(train_path: str | Path) -> dict:
             n0 += 1
 
     total = n0 + n1
+
     if total == 0:
         raise ValueError(f"Cannot compute class weights: '{train_path}' contains no examples.")
+    
     if n0 == 0 or n1 == 0:
-        raise ValueError(
-            f"Cannot compute class weights from '{train_path}': n0={n0}, n1={n1}. "
-            "Both classes must be present."
+        strict_env = os.getenv("ELP_GUNSHOT_STRICT_CLASS_WEIGHTS", "0").lower()
+        strict = strict_env in ("1", "true", "yes")
+        if strict:
+            raise ValueError(
+                f"Cannot compute class weights from '{train_path}': n0={n0}, n1={n1}. "
+                "Both classes must be present."
+            )
+        tf.get_logger().warning(
+            f"Single-class training data detected in '{train_path}' (n0={n0}, n1={n1}); "
+            f"falling back to uniform class weights {{0: 1.0, 1: 1.0}}."
         )
+        return {0: 1.0, 1: 1.0}
 
     return {0: total / (2.0 * n0), 1: total / (2.0 * n1)}
