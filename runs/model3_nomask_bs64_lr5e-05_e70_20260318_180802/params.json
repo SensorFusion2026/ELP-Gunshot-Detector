@@ -1,0 +1,43 @@
+{
+  "model": "model3",
+  "tag": "nomask",
+  "tfrecord_dir": "/expanse/lustre/projects/cso100/rdenn/ElephantListeningProject/ELP-Gunshot-Detector/data/tfrecords/model3_nomask",
+  "train_tfrecord": "/expanse/lustre/projects/cso100/rdenn/ElephantListeningProject/ELP-Gunshot-Detector/data/tfrecords/model3_nomask/train.tfrecord",
+  "val_tfrecord": "/expanse/lustre/projects/cso100/rdenn/ElephantListeningProject/ELP-Gunshot-Detector/data/tfrecords/model3_nomask/val.tfrecord",
+  "test_tfrecord": "/expanse/lustre/projects/cso100/rdenn/ElephantListeningProject/ELP-Gunshot-Detector/data/tfrecords/model3_nomask/test.tfrecord",
+  "tfrecord_metadata": "/expanse/lustre/projects/cso100/rdenn/ElephantListeningProject/ELP-Gunshot-Detector/data/tfrecords/model3_nomask/metadata.json",
+  "input_shape": [
+    124,
+    129,
+    1
+  ],
+  "batch_size": 64,
+  "epochs": 70,
+  "learning_rate": 5e-05,
+  "dropout_rate": 0.5,
+  "class_weights": {
+    "0": 0.6665178571428572,
+    "1": 2.0013404825737267
+  },
+  "mixed_precision": true,
+  "early_stop_patience": 8,
+  "val_min_precision": 0.75,
+  "seed": 42,
+  "normalization": {
+    "model": "model3",
+    "mask": "nomask",
+    "tag": "nomask",
+    "target_sr": 4000,
+    "clip_len_s": 4.0,
+    "frame_length": 256,
+    "frame_step": 128,
+    "fft_length": 256,
+    "spec_norm_mean": 0.08040060544070264,
+    "spec_norm_std": 0.17225328828222017,
+    "counts": {
+      "train": 4479,
+      "val": 824,
+      "test": 744
+    }
+  }
+}

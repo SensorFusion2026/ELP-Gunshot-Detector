@@ -3,8 +3,12 @@
 Generate publication-quality figures from a completed gunshot CNN training run.
 
 Usage:
-    python -m elp_gunshot.evaluate_cnn --run_dir runs/model3_nomask_bs64_lr3e-05_e40_20260318_120000
-    python -m elp_gunshot.evaluate_cnn --run_dir runs/... --output_dir results/
+    python -m elp_gunshot.evaluate_cnn --run_dir runs/model3_nomask_bs64_lr5e-05_e70_20260318_180802
+    python -m elp_gunshot.evaluate_cnn --run_dir runs/... --output_dir /tmp/eval_figures
+
+Output location behavior:
+    By default, figures are written to <run_dir>/figures.
+    If --output_dir is provided, figures are written directly to that directory.
 """
 
 import argparse
@@ -140,6 +144,24 @@ def plot_pr_curve(preds_df: pd.DataFrame, output_dir: Path) -> None:
     y_true = preds_df["y_true"].values
     y_score = preds_df["y_score"].values
 
+    # PR metrics are not meaningful when only one class is present.
+    unique_classes = np.unique(y_true)
+    if unique_classes.size < 2:
+        fig, ax = plt.subplots(figsize=(6, 5))
+        ax.text(
+            0.5,
+            0.5,
+            "PR curve undefined:\nonly one class present in y_true",
+            ha="center",
+            va="center",
+            fontsize=12,
+            wrap=True,
+        )
+        ax.set_axis_off()
+        fig.tight_layout()
+        save_fig(fig, output_dir, "pr_curve")
+        return
+
     precision, recall, _ = precision_recall_curve(y_true, y_score)
     ap = average_precision_score(y_true, y_score)
     baseline = y_true.mean()
@@ -165,14 +187,16 @@ def main():
     parser.add_argument(
         "--output_dir",
         type=Path,
-        default=Path("results"),
-        help="Base directory to write figures (default: results)",
+        default=None,
+        help=(
+            "Optional output directory. If omitted, figures are written to "
+            "<run_dir>/figures."
+        ),
     )
     args = parser.parse_args()
 
     run_dir: Path = args.run_dir
-    # Always write to a run-specific folder so results do not overwrite each other.
-    output_dir: Path = args.output_dir / run_dir.name
+    output_dir: Path = args.output_dir if args.output_dir is not None else run_dir / "figures"
 
     history_path = run_dir / "history.csv"
     metrics_path = run_dir / "test_metrics.json"
