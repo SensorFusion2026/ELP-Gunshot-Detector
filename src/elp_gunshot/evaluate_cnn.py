@@ -3,8 +3,12 @@
 Generate publication-quality figures from a completed gunshot CNN training run.
 
 Usage:
-    python -m elp_gunshot.evaluate_cnn --run_dir runs/model3_nomask_bs64_lr3e-05_e40_20260318_120000
-    python -m elp_gunshot.evaluate_cnn --run_dir runs/... --output_dir results/figures/
+    python -m elp_gunshot.evaluate_cnn --run_dir runs/model3_nomask_bs64_lr5e-05_e70_20260318_180802
+    python -m elp_gunshot.evaluate_cnn --run_dir runs/... --output_dir /tmp/eval_figures
+
+Output location behavior:
+    By default, figures are written to <run_dir>/figures.
+    If --output_dir is provided, figures are written directly to that directory.
 """
 
 import argparse
@@ -88,7 +92,7 @@ def plot_confusion_matrix(cm: dict, output_dir: Path) -> None:
             count = matrix[i, j]
             pct = 100.0 * count / total
             color = "white" if count > thresh else "black"
-            ax.text(j, i, f"{count}\\n({pct:.1f}%)", ha="center", va="center", color=color)
+            ax.text(j, i, f"{count}\n({pct:.1f}%)", ha="center", va="center", color=color)
 
     fig.tight_layout()
     save_fig(fig, output_dir, "confusion_matrix")
@@ -140,17 +144,35 @@ def plot_pr_curve(preds_df: pd.DataFrame, output_dir: Path) -> None:
     y_true = preds_df["y_true"].values
     y_score = preds_df["y_score"].values
 
+    # PR metrics are not meaningful when only one class is present.
+    unique_classes = np.unique(y_true)
+    if unique_classes.size < 2:
+        fig, ax = plt.subplots(figsize=(6, 5))
+        ax.text(
+            0.5,
+            0.5,
+            "PR curve undefined:\nonly one class present in y_true",
+            ha="center",
+            va="center",
+            fontsize=12,
+            wrap=True,
+        )
+        ax.set_axis_off()
+        fig.tight_layout()
+        save_fig(fig, output_dir, "pr_curve")
+        return
+
     precision, recall, _ = precision_recall_curve(y_true, y_score)
     ap = average_precision_score(y_true, y_score)
     baseline = y_true.mean()
 
     fig, ax = plt.subplots(figsize=(6, 5))
-    ax.plot(recall, precision, lw=2, label=f"AP = {ap:.4f}")
-    ax.axhline(baseline, color="k", linestyle="--", lw=1, label=f"Baseline = {baseline:.3f}")
+    ax.plot(recall, precision, lw=2, label=f"Avg Precision = {ap:.4f}")
+    ax.axhline(baseline, color="k", linestyle="--", lw=1, label=f"No-Skill Baseline = {baseline:.3f}")
     ax.set_xlabel("Recall")
     ax.set_ylabel("Precision")
     ax.set_title("Precision-Recall Curve")
-    ax.legend(loc="upper right")
+    ax.legend(loc="lower right")
     ax.grid(True, linestyle="--", alpha=0.5)
     ax.set_xlim([0.0, 1.0])
     ax.set_ylim([0.0, 1.05])
@@ -165,13 +187,16 @@ def main():
     parser.add_argument(
         "--output_dir",
         type=Path,
-        default=Path("results/figures"),
-        help="Directory to write figures (default: results/figures)",
+        default=None,
+        help=(
+            "Optional output directory. If omitted, figures are written to "
+            "<run_dir>/figures."
+        ),
     )
     args = parser.parse_args()
 
     run_dir: Path = args.run_dir
-    output_dir: Path = args.output_dir
+    output_dir: Path = args.output_dir if args.output_dir is not None else run_dir / "figures"
 
     history_path = run_dir / "history.csv"
     metrics_path = run_dir / "test_metrics.json"

@@ -1,0 +1,43 @@
+{
+  "model": "model1",
+  "tag": "nomask",
+  "tfrecord_dir": "/Users/rileydenn/Projects/ElephantListeningProject/ELP-Gunshot-Detector/data/tfrecords/model1_nomask",
+  "train_tfrecord": "/Users/rileydenn/Projects/ElephantListeningProject/ELP-Gunshot-Detector/data/tfrecords/model1_nomask/train.tfrecord",
+  "val_tfrecord": "/Users/rileydenn/Projects/ElephantListeningProject/ELP-Gunshot-Detector/data/tfrecords/model1_nomask/val.tfrecord",
+  "test_tfrecord": "/Users/rileydenn/Projects/ElephantListeningProject/ELP-Gunshot-Detector/data/tfrecords/model1_nomask/test.tfrecord",
+  "tfrecord_metadata": "/Users/rileydenn/Projects/ElephantListeningProject/ELP-Gunshot-Detector/data/tfrecords/model1_nomask/metadata.json",
+  "input_shape": [
+    124,
+    129,
+    1
+  ],
+  "batch_size": 64,
+  "epochs": 2,
+  "learning_rate": 5e-05,
+  "dropout_rate": 0.5,
+  "class_weights": {
+    "0": 0.9836956521739131,
+    "1": 1.0168539325842696
+  },
+  "mixed_precision": false,
+  "early_stop_patience": 8,
+  "val_min_precision": 0.75,
+  "seed": 42,
+  "normalization": {
+    "model": "model1",
+    "mask": "nomask",
+    "tag": "nomask",
+    "target_sr": 4000,
+    "clip_len_s": 4.0,
+    "frame_length": 256,
+    "frame_step": 128,
+    "fft_length": 256,
+    "spec_norm_mean": 0.08316442949085245,
+    "spec_norm_std": 0.18868337745474173,
+    "counts": {
+      "train": 181,
+      "val": 45,
+      "test": 14
+    }
+  }
+}

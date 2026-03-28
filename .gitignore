@@ -1,5 +1,9 @@
 data/
-runs/
+runs/*
+!runs/model3_nomask_bs64_lr5e-05_e70_20260318_180802/
+!runs/model3_nomask_bs64_lr5e-05_e70_20260318_180802/**
+!runs/model1_nomask_bs64_lr5e-05_e2_20260328_084710/
+!runs/model1_nomask_bs64_lr5e-05_e2_20260328_084710/**
 
 .DS_Store
 

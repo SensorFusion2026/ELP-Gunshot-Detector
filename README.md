@@ -243,7 +243,7 @@ python -m elp_gunshot.evaluate_cnn --run_dir runs/<run_name>
 Optional output directory override:
 
 ```bash
-python -m elp_gunshot.evaluate_cnn --run_dir runs/<run_name> --output_dir results/figures
+python -m elp_gunshot.evaluate_cnn --run_dir runs/<run_name> --output_dir tmp/figures
 ```
 
 Display-only notebook:
@@ -276,6 +276,8 @@ Includes:
 | `test_metrics.json` | Test-set accuracy, precision, recall, AUC, and confusion matrix keys `tp/tn/fp/fn` |
 | `test_predictions.csv` | Per-clip: `clip_wav_relpath`, `y_true`, `y_pred`, `y_score`, `threshold` |
 | `logs/` | TensorBoard event files |
+
+Running the evaluation script will read this data and save figures to the runs/<model>-<tag>_.../ directory.
 
 ---
 
