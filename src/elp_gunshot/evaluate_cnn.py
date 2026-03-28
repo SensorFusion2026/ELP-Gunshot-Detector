@@ -145,13 +145,12 @@ def plot_pr_curve(preds_df: pd.DataFrame, output_dir: Path) -> None:
     baseline = y_true.mean()
 
     fig, ax = plt.subplots(figsize=(6, 5))
-    ax.plot(recall, precision, lw=2, label=f"AP = {ap:.4f}")
-    ax.axhline(baseline, color="k", linestyle="--", lw=1, label=f"Baseline = {baseline:.3f}")
+    ax.plot(recall, precision, lw=2, label=f"Avg Precision = {ap:.4f}")
+    ax.axhline(baseline, color="k", linestyle="--", lw=1, label=f"No-Skill Baseline = {baseline:.3f}")
     ax.set_xlabel("Recall")
     ax.set_ylabel("Precision")
     ax.set_title("Precision-Recall Curve")
-    # Keep legend off the plotted curve to avoid obscuring precision-recall shape.
-    ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), borderaxespad=0.0)
+    ax.legend(loc="lower right")
     ax.grid(True, linestyle="--", alpha=0.5)
     ax.set_xlim([0.0, 1.0])
     ax.set_ylim([0.0, 1.05])
