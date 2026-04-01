@@ -53,7 +53,7 @@ def plot_training_curves(history_df: pd.DataFrame, output_dir: Path) -> None:
         ax.plot(history_df["epoch"], history_df["val_auc"], label="Val AUC")
     ax.set_xlabel("Epoch")
     ax.set_ylabel("AUC")
-    ax.set_title("Training / Validation AUC")
+    ax.set_title("Training / Validation Area Under Curve (AUC)")
     ax.legend()
     ax.grid(True, linestyle="--", alpha=0.5)
 
@@ -130,7 +130,7 @@ def plot_roc_curve(preds_df: pd.DataFrame, output_dir: Path) -> None:
     ax.plot([0, 1], [0, 1], "k--", lw=1, label="Random (AUC = 0.50)")
     ax.set_xlabel("False Positive Rate")
     ax.set_ylabel("True Positive Rate")
-    ax.set_title("ROC Curve")
+    ax.set_title("Receiver Operating Characteristic (ROC) Curve")
     ax.legend(loc="lower right")
     ax.grid(True, linestyle="--", alpha=0.5)
 
@@ -151,7 +151,7 @@ def plot_pr_curve(preds_df: pd.DataFrame, output_dir: Path) -> None:
         ax.text(
             0.5,
             0.5,
-            "PR curve undefined:\nonly one class present in y_true",
+            "Precision-Recall curve undefined:\nonly one class present in y_true",
             ha="center",
             va="center",
             fontsize=12,
@@ -167,8 +167,8 @@ def plot_pr_curve(preds_df: pd.DataFrame, output_dir: Path) -> None:
     baseline = y_true.mean()
 
     fig, ax = plt.subplots(figsize=(6, 5))
-    ax.plot(recall, precision, lw=2, label=f"Avg Precision = {ap:.4f}")
-    ax.axhline(baseline, color="k", linestyle="--", lw=1, label=f"No-Skill Baseline = {baseline:.3f}")
+    ax.plot(recall, precision, lw=2, label=f"Average Precision = {ap:.4f}")
+    ax.axhline(baseline, color="k", linestyle="--", lw=1, label=f"Baseline (y_true mean) = {baseline:.3f}")
     ax.set_xlabel("Recall")
     ax.set_ylabel("Precision")
     ax.set_title("Precision-Recall Curve")
