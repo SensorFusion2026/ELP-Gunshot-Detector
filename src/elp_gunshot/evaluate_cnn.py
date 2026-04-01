@@ -168,7 +168,7 @@ def plot_pr_curve(preds_df: pd.DataFrame, output_dir: Path) -> None:
 
     fig, ax = plt.subplots(figsize=(6, 5))
     ax.plot(recall, precision, lw=2, label=f"Average Precision = {ap:.4f}")
-    ax.axhline(baseline, color="k", linestyle="--", lw=1, label=f"Baseline (y-true mean) = {baseline:.3f}")
+    ax.axhline(baseline, color="k", linestyle="--", lw=1, label=f"Baseline (y_true mean) = {baseline:.3f}")
     ax.set_xlabel("Recall")
     ax.set_ylabel("Precision")
     ax.set_title("Precision-Recall Curve")
